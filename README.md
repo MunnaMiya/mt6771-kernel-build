@@ -1,0 +1,1 @@
+# mt6771-kernel-build
