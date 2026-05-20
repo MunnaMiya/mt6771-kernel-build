@@ -37,16 +37,18 @@ jobs:
     - name: Show CPU OPP Table
       continue-on-error: true
       run: |
-        CPU_FILE="kernel-source/drivers/misc/mediatek/base/power/cpufreq_v1/src/mach/mt6771/mtk_cpufreq_platform.c"
-        echo "=== CPU FILE ==="
-        cat -n "$CPU_FILE"
+        echo "=== CPU HEADER FILE ==="
+        cat -n "kernel-source/drivers/misc/mediatek/base/power/cpufreq_v1/src/mach/mt6771/mtk_cpufreq_platform.h"
+        echo "=== ALL FILES IN MT6771 CPU DIR ==="
+        ls -la kernel-source/drivers/misc/mediatek/base/power/cpufreq_v1/src/mach/mt6771/
 
     - name: Show GPU OPP Table
       continue-on-error: true
       run: |
-        GPU_FILE="kernel-source/drivers/misc/mediatek/base/power/mt6771/mtk_gpufreq_core.c"
-        echo "=== GPU FILE ==="
-        cat -n "$GPU_FILE"
+        echo "=== GPU CORE FILE ==="
+        cat -n "kernel-source/drivers/misc/mediatek/base/power/mt6771/mtk_gpufreq_core.c"
+        echo "=== ALL FILES IN MT6771 GPU DIR ==="
+        ls -la kernel-source/drivers/misc/mediatek/base/power/mt6771/
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
