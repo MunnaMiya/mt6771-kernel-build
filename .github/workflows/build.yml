@@ -34,34 +34,19 @@ jobs:
           https://github.com/nokia-dev/android_kernel_nokia_mt6771.git \
           kernel-source
 
-    - name: Find OPP Driver Files
-      continue-on-error: true
-      run: |
-        cd kernel-source
-        echo "====== CPU OPP FILES ======"
-        find . -name "*.c" | xargs grep -l \
-          "opp_tbl\|MT_CPU_DVFS\|cpu_dvfs_freq" 2>/dev/null || true
-        echo "====== GPU OPP FILES ======"
-        find . -name "*.c" | xargs grep -l \
-          "g_opp_table\|gpufreq_opp\|GPU_DVFS_FREQ" 2>/dev/null || true
-
     - name: Show CPU OPP Table
       continue-on-error: true
       run: |
         CPU_FILE="kernel-source/drivers/misc/mediatek/base/power/cpufreq_v1/src/mach/mt6771/mtk_cpufreq_platform.c"
-        echo "=== CPU FILE EXISTS ==="
-        ls -lh "$CPU_FILE"
-        echo "=== CPU OPP TABLE ==="
-        grep -n "opp_tbl\|OP(\|FREQ\|khz\|volt\|dvfs_freq\|OPP" "$CPU_FILE" | head -100
+        echo "=== CPU FILE ==="
+        cat -n "$CPU_FILE"
 
     - name: Show GPU OPP Table
       continue-on-error: true
       run: |
         GPU_FILE="kernel-source/drivers/misc/mediatek/base/power/mt6771/mtk_gpufreq_core.c"
-        echo "=== GPU FILE EXISTS ==="
-        ls -lh "$GPU_FILE"
-        echo "=== GPU OPP TABLE ==="
-        grep -n "GPUOP\|GPU_DVFS_FREQ\|GPU_DVFS_VOLT\|gpufreq_opp\|opp_tbl" "$GPU_FILE" | head -100
+        echo "=== GPU FILE ==="
+        cat -n "$GPU_FILE"
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
