@@ -37,10 +37,12 @@ jobs:
     - name: Show CPU OPP Table
       continue-on-error: true
       run: |
-        echo "=== CPU HEADER FILE ==="
-        cat -n "kernel-source/drivers/misc/mediatek/base/power/cpufreq_v1/src/mach/mt6771/mtk_cpufreq_platform.h"
-        echo "=== ALL FILES IN MT6771 CPU DIR ==="
-        ls -la kernel-source/drivers/misc/mediatek/base/power/cpufreq_v1/src/mach/mt6771/
+        OPP_FILE="kernel-source/drivers/misc/mediatek/base/power/cpufreq_v1/src/mach/mt6771/mtk_cpufreq_opp_table.h"
+        PV_FILE="kernel-source/drivers/misc/mediatek/base/power/cpufreq_v1/src/mach/mt6771/mtk_cpufreq_opp_pv_table.h"
+        echo "=== OPP TABLE ==="
+        cat -n "$OPP_FILE"
+        echo "=== PV TABLE ==="
+        cat -n "$PV_FILE"
 
     - name: Show GPU OPP Table
       continue-on-error: true
