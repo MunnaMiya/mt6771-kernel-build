@@ -12,49 +12,13 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Install Dependencies
-      run: |
-        sudo apt update
-        sudo apt install -y git wget curl bc \
-          libssl-dev libelf-dev bison flex \
-          gcc-aarch64-linux-gnu \
-          binutils-aarch64-linux-gnu \
-          build-essential libncurses-dev python3
-
-    - name: Get Clang 6.0
-      run: |
-        wget -q \
-          https://releases.llvm.org/6.0.0/clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04.tar.xz
-        tar -xf clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04.tar.xz
-        mv clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04 $HOME/clang-6.0
-
     - name: Clone Nokia MT6771 Kernel
       run: |
         git clone --depth=1 \
           https://github.com/nokia-dev/android_kernel_nokia_mt6771.git \
           kernel-source
 
-    - name: Show CPU OPP Table
+    - name: Show GPU Header
       continue-on-error: true
       run: |
-        OPP_FILE="kernel-source/drivers/misc/mediatek/base/power/cpufreq_v1/src/mach/mt6771/mtk_cpufreq_opp_table.h"
-        PV_FILE="kernel-source/drivers/misc/mediatek/base/power/cpufreq_v1/src/mach/mt6771/mtk_cpufreq_opp_pv_table.h"
-        echo "=== OPP TABLE ==="
-        cat -n "$OPP_FILE"
-        echo "=== PV TABLE ==="
-        cat -n "$PV_FILE"
-
-    - name: Show GPU OPP Table
-      continue-on-error: true
-      run: |
-        echo "=== GPU CORE FILE ==="
-        cat -n "kernel-source/drivers/misc/mediatek/base/power/mt6771/mtk_gpufreq_core.c"
-        echo "=== ALL FILES IN MT6771 GPU DIR ==="
-        ls -la kernel-source/drivers/misc/mediatek/base/power/mt6771/
-
-    - name: Upload Artifacts
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: kernel-scan
-        path: kernel-source/
+        cat -n "kernel-source/drivers/misc/mediatek/base/power/mt6771/mtk_gpufreq_core.h"
