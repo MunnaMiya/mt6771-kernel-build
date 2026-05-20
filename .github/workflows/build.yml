@@ -1,0 +1,75 @@
+name: Build MT6771 Kernel
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - name: Install Dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y git wget curl bc \
+          libssl-dev libelf-dev bison flex \
+          gcc-aarch64-linux-gnu \
+          binutils-aarch64-linux-gnu \
+          build-essential libncurses-dev \
+          python3 python2-minimal
+
+    - name: Get Clang 6.0
+      run: |
+        wget -q \
+          https://releases.llvm.org/6.0.0/clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04.tar.xz
+        tar -xf clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04.tar.xz
+        mv clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04 $HOME/clang-6.0
+
+    - name: Clone Nokia MT6771 Kernel
+      run: |
+        git clone --depth=1 \
+          https://github.com/nokia-dev/android_kernel_nokia_mt6771.git \
+          kernel-source
+
+    - name: Find OPP Driver Files
+      run: |
+        cd kernel-source
+        echo "====== CPU OPP FILES ======"
+        find . -name "*.c" | xargs grep -l \
+          "opp_tbl\|MT_CPU_DVFS\|cpu_dvfs_freq" 2>/dev/null
+        echo "====== GPU OPP FILES ======"
+        find . -name "*.c" | xargs grep -l \
+          "g_opp_table\|gpufreq_opp\|GPU_DVFS_FREQ" 2>/dev/null
+        echo "====== DTS FILES ======"
+        find . -name "*.dts" -o -name "*.dtsi" | \
+          xargs grep -l "mt6771\|helio" 2>/dev/null
+
+    - name: Show CPU OPP Table Content
+      run: |
+        cd kernel-source
+        CPU_FILE=$(find . -name "*.c" | \
+          xargs grep -l "MT_CPU_DVFS_LL\|opp_tbl_e1" 2>/dev/null | head -1)
+        echo "Found: $CPU_FILE"
+        if [ -n "$CPU_FILE" ]; then
+          grep -n "opp_tbl\|OP(\|FREQ\|dvfs_freq" "$CPU_FILE" | head -60
+        fi
+
+    - name: Show GPU OPP Table Content
+      run: |
+        cd kernel-source
+        GPU_FILE=$(find . -name "*.c" | \
+          xargs grep -l "g_opp_table\|GPU_DVFS_FREQ" 2>/dev/null | head -1)
+        echo "Found: $GPU_FILE"
+        if [ -n "$GPU_FILE" ]; then
+          grep -n "g_opp_table\|GPU_DVFS_FREQ\|opp_table" "$GPU_FILE" | head -60
+        fi
+
+    - name: Upload Scan Results
+      uses: actions/upload-artifact@v3
+      with:
+        name: opp-scan-results
+        path: kernel-source/
