@@ -19,8 +19,7 @@ jobs:
           libssl-dev libelf-dev bison flex \
           gcc-aarch64-linux-gnu \
           binutils-aarch64-linux-gnu \
-          build-essential libncurses-dev \
-          python3 python2-minimal
+          build-essential libncurses-dev python3
 
     - name: Get Clang 6.0
       run: |
@@ -36,40 +35,41 @@ jobs:
           kernel-source
 
     - name: Find OPP Driver Files
+      continue-on-error: true
       run: |
         cd kernel-source
         echo "====== CPU OPP FILES ======"
         find . -name "*.c" | xargs grep -l \
-          "opp_tbl\|MT_CPU_DVFS\|cpu_dvfs_freq" 2>/dev/null
+          "opp_tbl\|MT_CPU_DVFS\|cpu_dvfs_freq" 2>/dev/null || true
         echo "====== GPU OPP FILES ======"
         find . -name "*.c" | xargs grep -l \
-          "g_opp_table\|gpufreq_opp\|GPU_DVFS_FREQ" 2>/dev/null
-        echo "====== DTS FILES ======"
-        find . -name "*.dts" -o -name "*.dtsi" | \
-          xargs grep -l "mt6771\|helio" 2>/dev/null
+          "g_opp_table\|gpufreq_opp\|GPU_DVFS_FREQ" 2>/dev/null || true
 
-    - name: Show CPU OPP Table Content
+    - name: Show CPU OPP Table
+      continue-on-error: true
       run: |
         cd kernel-source
         CPU_FILE=$(find . -name "*.c" | \
           xargs grep -l "MT_CPU_DVFS_LL\|opp_tbl_e1" 2>/dev/null | head -1)
-        echo "Found: $CPU_FILE"
+        echo "Found CPU file: $CPU_FILE"
         if [ -n "$CPU_FILE" ]; then
-          grep -n "opp_tbl\|OP(\|FREQ\|dvfs_freq" "$CPU_FILE" | head -60
+          grep -n "opp_tbl\|OP(\|FREQ\|dvfs_freq" "$CPU_FILE" | head -80
         fi
 
-    - name: Show GPU OPP Table Content
+    - name: Show GPU OPP Table
+      continue-on-error: true
       run: |
         cd kernel-source
         GPU_FILE=$(find . -name "*.c" | \
           xargs grep -l "g_opp_table\|GPU_DVFS_FREQ" 2>/dev/null | head -1)
-        echo "Found: $GPU_FILE"
+        echo "Found GPU file: $GPU_FILE"
         if [ -n "$GPU_FILE" ]; then
-          grep -n "g_opp_table\|GPU_DVFS_FREQ\|opp_table" "$GPU_FILE" | head -60
+          grep -n "g_opp_table\|GPU_DVFS_FREQ\|opp_table" "$GPU_FILE" | head -80
         fi
 
-    - name: Upload Scan Results
+    - name: Upload Artifacts
       uses: actions/upload-artifact@v4
+      if: always()
       with:
-        name: opp-scan-results
+        name: kernel-scan
         path: kernel-source/
