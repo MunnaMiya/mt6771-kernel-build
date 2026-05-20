@@ -1,4 +1,4 @@
-name: Build MT6771 Kernel
+name: Build MT6771 Kernel OC
 on:
   workflow_dispatch:
   push:
@@ -12,13 +12,138 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
+    - name: Install Dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y git wget curl bc \
+          libssl-dev libelf-dev bison flex \
+          gcc-aarch64-linux-gnu \
+          binutils-aarch64-linux-gnu \
+          build-essential libncurses-dev python3
+
+    - name: Get Clang 6.0
+      run: |
+        wget -q \
+          https://releases.llvm.org/6.0.0/clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04.tar.xz
+        tar -xf clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04.tar.xz
+        mv clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04 $HOME/clang-6.0
+
     - name: Clone Nokia MT6771 Kernel
       run: |
         git clone --depth=1 \
           https://github.com/nokia-dev/android_kernel_nokia_mt6771.git \
           kernel-source
 
-    - name: Show GPU Header
-      continue-on-error: true
+    - name: Patch CPU OPP
       run: |
-        cat -n "kernel-source/drivers/misc/mediatek/base/power/mt6771/mtk_gpufreq_core.h"
+        python3 << 'EOF'
+import re
+
+path = "kernel-source/drivers/misc/mediatek/base/power/cpufreq_v1/src/mach/mt6771/mtk_cpufreq_platform.c"
+
+with open(path, "r") as f:
+    content = f.read()
+
+old = """unsigned int _mt_cpufreq_get_cpu_level(void)
+{
+\tunsigned int lv = CPU_LEVEL_0;
+\tunsigned int temp = 0;
+\tunsigned int segcode = 0;
+\tunsigned int bincode = 0;
+\tunsigned int turbocode = 0;
+\tunsigned int a_code = 0;"""
+
+new = """unsigned int _mt_cpufreq_get_cpu_level(void)
+{
+\t/* OC patch: force highest OPP table for all chip variants */
+\tturbo_flag = 0;
+\treturn CPU_LEVEL_0;
+
+\tunsigned int lv = CPU_LEVEL_0;
+\tunsigned int temp = 0;
+\tunsigned int segcode = 0;
+\tunsigned int bincode = 0;
+\tunsigned int turbocode = 0;
+\tunsigned int a_code = 0;"""
+
+if old in content:
+    content = content.replace(old, new)
+    print("CPU patch applied successfully")
+else:
+    print("WARNING: CPU patch string not found, check manually")
+
+with open(path, "w") as f:
+    f.write(content)
+EOF
+
+    - name: Patch GPU Segment
+      run: |
+        python3 << 'EOF'
+path = "kernel-source/drivers/misc/mediatek/base/power/mt6771/mtk_gpufreq_core.c"
+
+with open(path, "r") as f:
+    content = f.read()
+
+old = """\tif (g_efuse_speed_bound_id == 0x03000000) {
+\t\t/* 900MHz Version */
+\t\tg_segment_id = MT6771_SEGMENT_1;
+\t} else if (g_efuse_speed_bound_id == 0x05000000) {
+\t\t/* 800MHz Version */
+\t\tg_segment_id = MT6771_SEGMENT_2;
+\t} else if (g_efuse_speed_bound_id == 0x07000000) {
+\t\t/* 700MHz Version */
+\t\tg_segment_id = MT6771_SEGMENT_3;
+\t} else if (g_efuse_speed_bound_id == 0x02000000 && g_efuse_turbo_id == 0x00000008) {
+\t\t/* 900MHz Version */
+\t\tg_segment_id = MT6771_SEGMENT_4;
+\t} else {
+\t\t/* Other Version, set default segment */
+\t\tg_segment_id = MT6771_SEGMENT_2;
+\t}"""
+
+new = """\t/* OC patch: force Segment 1 = 900MHz GPU for all variants */
+\tg_segment_id = MT6771_SEGMENT_1;"""
+
+if old in content:
+    content = content.replace(old, new)
+    print("GPU patch applied successfully")
+else:
+    print("WARNING: GPU patch string not found, check manually")
+
+with open(path, "w") as f:
+    f.write(content)
+EOF
+
+    - name: Copy Kernel Config
+      run: |
+        cp kernel_config.txt \
+          kernel-source/arch/arm64/configs/walton_defconfig
+        wc -l kernel-source/arch/arm64/configs/walton_defconfig
+
+    - name: Configure Kernel
+      run: |
+        cd kernel-source
+        make ARCH=arm64 \
+             CC=$HOME/clang-6.0/bin/clang \
+             CROSS_COMPILE=aarch64-linux-gnu- \
+             walton_defconfig
+
+    - name: Build Kernel
+      run: |
+        cd kernel-source
+        make ARCH=arm64 \
+             CC=$HOME/clang-6.0/bin/clang \
+             CROSS_COMPILE=aarch64-linux-gnu- \
+             CLANG_TRIPLE=aarch64-linux-gnu- \
+             -j$(nproc) Image.gz 2>&1 | tee build.log
+        echo "Build exit code: $?"
+        ls -lh arch/arm64/boot/Image.gz 2>/dev/null || echo "Image.gz not found"
+
+    - name: Upload Kernel
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: kernel-oc
+        path: |
+          kernel-source/arch/arm64/boot/Image.gz
+          kernel-source/build.log
