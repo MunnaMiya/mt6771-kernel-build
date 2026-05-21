@@ -44,7 +44,7 @@ jobs:
         # Remove -Werror
         find . -type f \( -name "Makefile" -o -name "Kbuild" \) \
           -exec sed -i 's/-Werror//g' {} + 2>/dev/null || true
-        # Remove implicit-function-declaration flag (GCC compat)
+        # Remove implicit-function-declaration flag
         grep -rl "implicit-function-declaration" . 2>/dev/null | while read f; do
           sed -i '/implicit-function-declaration/d' "$f"
           echo "  Fixed: $f"
@@ -56,7 +56,7 @@ jobs:
         sed -i 's/(desc && desc->action && desc->action->name) ?/(0) ?/g' \
           kernel/irq/irqdesc.c
 
-        # Add include paths for missing headers
+        # --- Add include paths for missing headers ---
         # helio-dvfsrc.h (drivers/devfreq)
         sed -i '1i ccflags-y += -I$(srctree)/drivers/devfreq' \
           drivers/devfreq/Makefile
@@ -64,6 +64,12 @@ jobs:
         # mtk_cm_mgr.h (cm_mgr_v1)
         sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/cm_mgr_v1' \
           drivers/misc/mediatek/base/power/cm_mgr_v1/Makefile
+
+        # mtk_gpufreq.h (needed by mtk_gpufreq_core.c in mt6771 power)
+        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/include' \
+          drivers/misc/mediatek/base/power/mt6771/Makefile
+        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/include' \
+          drivers/misc/mediatek/base/power/mt6771/Makefile
 
         echo "Fixes applied"
 
