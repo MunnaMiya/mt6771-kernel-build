@@ -26,7 +26,7 @@ jobs:
         mkdir -p $GITHUB_WORKSPACE/toolchains
         cd $GITHUB_WORKSPACE/toolchains
         
-        # Download AOSP Clang 10.0.4 (MTK 4.4 কার্নেলের জন্য পারফেক্ট)
+        # Download AOSP Clang 10.0.4 (MTK 4.4 কার্নেলের জন্য পারфেক্ট)
         echo "Downloading Clang..."
         wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/android-10.0.4/clang-r353392d.tar.gz
         mkdir clang && tar -xf clang-r353392d.tar.gz -C clang
@@ -130,7 +130,7 @@ jobs:
         fi
 
     - name: Upload Kernel Output
-      uses: actions/upload-archive@v4
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: Walton-RX7-Mini-OC-Kernel
