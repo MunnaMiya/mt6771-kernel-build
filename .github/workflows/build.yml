@@ -8,7 +8,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: ubuntu:18.04
+      image: ubuntu:20.04
 
     steps:
     - name: Install Dependencies
@@ -16,10 +16,16 @@ jobs:
         apt-get update
         apt-get install -y git wget curl bc bison flex \
           build-essential libssl-dev libelf-dev \
-          libncurses5-dev python3 python \
+          libncurses-dev python3 python3-pip \
           gcc-aarch64-linux-gnu \
           binutils-aarch64-linux-gnu \
-          cpio rsync ca-certificates gnupg
+          cpio rsync ca-certificates gnupg \
+          clang-10 llvm-10 lld-10
+
+    - name: Setup Clang-10
+      run: |
+        update-alternatives --install /usr/bin/clang clang /usr/bin/clang-10 100
+        clang --version
 
     - name: Get kernel_config from repo
       env:
@@ -44,7 +50,7 @@ jobs:
         # Remove -Werror
         find . -type f \( -name "Makefile" -o -name "Kbuild" \) \
           -exec sed -i 's/-Werror//g' {} + 2>/dev/null || true
-        # Remove implicit-function-declaration flag
+        # Remove implicit-function-declaration flag (GCC compat)
         grep -rl "implicit-function-declaration" . 2>/dev/null | while read f; do
           sed -i '/implicit-function-declaration/d' "$f"
           echo "  Fixed: $f"
@@ -57,11 +63,8 @@ jobs:
           kernel/irq/irqdesc.c
 
         # Add include paths for missing headers
-        # helio-dvfsrc.h (drivers/devfreq)
         sed -i '1i ccflags-y += -I$(srctree)/drivers/devfreq' \
           drivers/devfreq/Makefile
-
-        # mtk_cm_mgr.h (cm_mgr_v1)
         sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/cm_mgr_v1' \
           drivers/misc/mediatek/base/power/cm_mgr_v1/Makefile
 
@@ -111,6 +114,8 @@ jobs:
         cd kernel-source
         make ARCH=arm64 \
              CROSS_COMPILE=aarch64-linux-gnu- \
+             CC=clang \
+             CLANG_TRIPLE=aarch64-linux-gnu- \
              walton_defconfig
 
     - name: Build Kernel
@@ -120,7 +125,10 @@ jobs:
         set -o pipefail
         make ARCH=arm64 \
              CROSS_COMPILE=aarch64-linux-gnu- \
+             CC=clang \
+             CLANG_TRIPLE=aarch64-linux-gnu- \
              HOSTCFLAGS="-fcommon" \
+             KCFLAGS="-no-integrated-as -Wno-error" \
              -j$(nproc) Image.gz 2>&1 | tee build.log
         BUILD_RESULT=${PIPESTATUS[0]}
         echo "Exit code: $BUILD_RESULT"
@@ -136,8 +144,6 @@ jobs:
     - name: Upload Kernel
       uses: actions/upload-artifact@v4
       if: always()
-      # Run on host runner to avoid GLIBC issue in Ubuntu 18.04 container
-      container: ''
       with:
         name: kernel-oc
         path: |
