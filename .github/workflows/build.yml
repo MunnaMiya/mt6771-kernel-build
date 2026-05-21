@@ -73,6 +73,10 @@ jobs:
         sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/ppm_v3/src/mach/mt6771' \
           drivers/misc/mediatek/base/power/ppm_v3/src/mach/mt6771/Makefile
 
+        # mtk_spm_sleep_internal.h (spm_v4 directory)
+        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/spm_v4' \
+          drivers/misc/mediatek/base/power/spm_v4/Makefile
+
         echo "Fixes applied"
 
     - name: Patch CPU OPP
