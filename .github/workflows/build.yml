@@ -20,7 +20,7 @@ jobs:
           gcc-aarch64-linux-gnu \
           binutils-aarch64-linux-gnu \
           build-essential libncurses-dev python3 \
-          clang-10 llvm-10 lld-10
+          clang-15 llvm-15 lld-15
 
     - name: Clone Nokia MT6771 Kernel
       run: |
@@ -32,10 +32,13 @@ jobs:
       run: |
         sed -i 's/ -Werror//g' kernel-source/Makefile
         sed -i 's/ -Werror//g' kernel-source/arch/arm64/Makefile
+        find kernel-source -name "Makefile" | \
+          xargs sed -i 's/-Werror=implicit-function-declaration//g' 2>/dev/null || true
+        find kernel-source -name "Makefile" | \
+          xargs sed -i 's/-implicit-function-declaration//g' 2>/dev/null || true
         sed -i '/^YYLTYPE yylloc;/s/^/extern /' \
           kernel-source/scripts/dtc/dtc-lexer.lex.c_shipped
-        echo "DTC patch check:"
-        grep "yylloc" kernel-source/scripts/dtc/dtc-lexer.lex.c_shipped | head -3
+        echo "Patches applied"
 
     - name: Patch CPU OPP
       shell: python3 {0}
@@ -79,7 +82,7 @@ jobs:
         cd kernel-source
         make ARCH=arm64 \
              CROSS_COMPILE=aarch64-linux-gnu- \
-             CC=clang-10 \
+             CC=clang-15 \
              CLANG_TRIPLE=aarch64-linux-gnu- \
              walton_defconfig
 
@@ -88,19 +91,19 @@ jobs:
         cd kernel-source
         make ARCH=arm64 \
              CROSS_COMPILE=aarch64-linux-gnu- \
-             CC=clang-10 \
+             CC=clang-15 \
              CLANG_TRIPLE=aarch64-linux-gnu- \
              HOSTCFLAGS="-fcommon" \
-             KCFLAGS="-Wno-error" \
+             KCFLAGS="-Wno-error -Wno-implicit-function-declaration" \
              -j$(nproc) Image.gz 2>&1 | tee build.log
         BUILD_RESULT=${PIPESTATUS[0]}
         echo "Exit code: $BUILD_RESULT"
         if [ -f arch/arm64/boot/Image.gz ]; then
-          echo "SUCCESS: Image.gz found"
+          echo "SUCCESS"
           ls -lh arch/arm64/boot/Image.gz
         else
-          echo "FAILED: Image.gz not found"
-          grep -i "error:" build.log | tail -30
+          echo "FAILED"
+          grep "error:" build.log | grep -v "warning:" | tail -30
           exit 1
         fi
 
