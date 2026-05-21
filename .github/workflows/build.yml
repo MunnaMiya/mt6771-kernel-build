@@ -6,7 +6,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04 # 24.04-এর প্যাকেজ মিসিং এরর এড়াতে 22.04 ব্যবহার করা হলো
+    runs-on: ubuntu-latest
 
     steps:
     - name: Checkout
@@ -14,24 +14,28 @@ jobs:
 
     - name: Install Dependencies
       run: |
-        sudo apt update
-        # ubuntu-22.04 এ এক্সট্রা কোনো সোর্স ছাড়াই এগুলো ইন্সটল হবে
-        sudo apt install -y git wget curl bc \
+        sudo apt-get update
+        sudo apt-get install -y git wget curl bc \
           libssl-dev libelf-dev bison flex \
-          build-essential libncurses-dev python3 \
-          zip unzip liblz4-tool lz4 libncurses5 libtinfo5
+          build-essential python3 zip unzip liblz4-tool lz4
+
+        # Ubuntu 24.04 (latest) এ ওল্ড Clang 6 রান করার জন্য ম্যানুয়াল লাইব্রেরি ইন্সটলেশন
+        echo "Installing legacy ncurses libraries manually..."
+        wget -q http://archive.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2_amd64.deb
+        wget -q http://archive.ubuntu.com/ubuntu/pool/universe/n/ncurses/libncurses5_6.3-2_amd64.deb
+        sudo dpkg -i libtinfo5_6.3-2_amd64.deb libncurses5_6.3-2_amd64.deb
 
     - name: Download Clang 6.0 & GCC 4.9 Toolchains
       run: |
         mkdir -p $GITHUB_WORKSPACE/toolchains
         cd $GITHUB_WORKSPACE/toolchains
         
-        # AOSP Clang 6.0.2 (তোমার স্টক কার্নেলের ভার্সন)
+        # AOSP Clang 6.0.2 (স্টক কার্নেল ভার্সন)
         echo "Downloading AOSP Clang 6.0..."
         wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/android-8.1.0_r0.15/clang-4691093.tar.gz
         mkdir clang && tar -xf clang-4691093.tar.gz -C clang
         
-        # LineageOS GCC 4.9 (Google-এর 404/128 এরর এড়ানোর জন্য সবচেয়ে সেফ অপশন)
+        # LineageOS GCC 4.9 (Error 128 বা 404 এড়ানোর জন্য সবচেয়ে সেফ এবং ফাস্ট গিট সোর্স)
         echo "Downloading GCC Aarch64 4.9..."
         git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git -b lineage-19.1 gcc64
         echo "Downloading GCC ARM 4.9..."
@@ -49,10 +53,10 @@ jobs:
         sed -i 's/ -Werror//g' Makefile
         sed -i 's/ -Werror//g' arch/arm64/Makefile
         
-        # ল্যাটেস্ট হোস্ট কম্পাইলারে ডুপ্লিকেট YYLTYPE এবং inline এরর ফিক্স
+        # ল্যাটেস্ট উবুন্টু হোস্ট কম্পাইলার (GCC 13) এর জন্য কার্নেলের ভেতরের ডুপ্লিকেট ভ্যারিয়েবল ফিক্স
         sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped
         sed -i 's/inline void __delay/static inline void __delay/g' arch/arm64/include/asm/delay.h || true
-        echo "Build fixes applied"
+        echo "Build fixes applied for latest host environment"
 
     - name: Patch CPU OPP
       shell: python3 {0}
@@ -115,7 +119,7 @@ jobs:
         # কনফিগ জেনারেট করা
         make O=out walton_defconfig
         
-        # মেইন কমপিলিং রান
+        # মেইন কমপিলিং রান (ল্যাটেস্ট হোস্টে ওল্ড সোর্স বিল্ডের জন্য HOSTCFLAGS ফ্ল্যাগস)
         make -j$(nproc) O=out \
           CC=clang \
           CLANG_TRIPLE=aarch64-linux-gnu- \
