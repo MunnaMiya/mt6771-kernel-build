@@ -76,17 +76,31 @@ jobs:
         sed -i 's/-fno-common/-fcommon/g' Makefile 2>/dev/null || true
         sed -i 's/-fno-common/-fcommon/g' arch/arm64/Makefile 2>/dev/null || true
         
-        # Fix missing 'desc' variable in kernel/irq/irqdesc.c
-        # The function __handle_domain_irq uses 'desc' but it may not be declared.
-        # Add the declaration before the pr_debug line.
-        IRQDESC_FILE="kernel/irq/irqdesc.c"
-        if grep -q "pr_debug.*desc.*action" "$IRQDESC_FILE"; then
-          # Insert the missing variable declaration before the pr_debug line that uses desc.
-          sed -i '/pr_debug.*desc.*action/ i\	struct irq_desc *desc = irq_to_desc(irq);' "$IRQDESC_FILE"
-          echo "Fixed missing 'desc' variable in $IRQDESC_FILE"
-        else
-          echo "Warning: Could not locate the problematic line in $IRQDESC_FILE; skipping fix."
-        fi
+        # Fix missing 'desc' variable in kernel/irq/irqdesc.c with a Python script
+        python3 << 'PYEOF'
+        import re
+        
+        filepath = "kernel/irq/irqdesc.c"
+        with open(filepath, "r") as f:
+            content = f.read()
+        
+        # Find the __handle_domain_irq function and insert the declaration
+        # after the opening brace, before any code that uses 'desc'.
+        func_pattern = r'(int __handle_domain_irq\([^)]*\)\s*\{)'
+        match = re.search(func_pattern, content)
+        if match:
+            # Insert after the opening brace
+            insert_point = match.end()
+            # Insert a newline and the declaration
+            declaration = "\n\tstruct irq_desc *desc = irq_to_desc(irq);\n"
+            content = content[:insert_point] + declaration + content[insert_point:]
+            with open(filepath, "w") as f:
+                f.write(content)
+            print("Inserted missing 'desc' declaration in __handle_domain_irq")
+        else:
+            print("ERROR: Could not find __handle_domain_irq function in irqdesc.c")
+            exit(1)
+        PYEOF
         
         echo "Build fixes applied successfully"
 
