@@ -59,7 +59,7 @@ jobs:
         find . -type f \( -name "Makefile" -o -name "Kbuild" \) \
           -exec sed -i 's/-Werror//g' {} + 2>/dev/null || true
         
-        # Completely remove the problematic -Wimplicit-function-declaration flag from ALL files
+        # Remove problematic -Wimplicit-function-declaration flag
         echo "Stripping implicit-function-declaration flags..."
         grep -rl "implicit-function-declaration" . 2>/dev/null | while read f; do
           sed -i '/implicit-function-declaration/d' "$f"
@@ -75,6 +75,18 @@ jobs:
         # Fix -fcommon issue
         sed -i 's/-fno-common/-fcommon/g' Makefile 2>/dev/null || true
         sed -i 's/-fno-common/-fcommon/g' arch/arm64/Makefile 2>/dev/null || true
+        
+        # Fix missing 'desc' variable in kernel/irq/irqdesc.c
+        # The function __handle_domain_irq uses 'desc' but it may not be declared.
+        # Add the declaration before the pr_debug line.
+        IRQDESC_FILE="kernel/irq/irqdesc.c"
+        if grep -q "pr_debug.*desc.*action" "$IRQDESC_FILE"; then
+          # Insert the missing variable declaration before the pr_debug line that uses desc.
+          sed -i '/pr_debug.*desc.*action/ i\	struct irq_desc *desc = irq_to_desc(irq);' "$IRQDESC_FILE"
+          echo "Fixed missing 'desc' variable in $IRQDESC_FILE"
+        else
+          echo "Warning: Could not locate the problematic line in $IRQDESC_FILE; skipping fix."
+        fi
         
         echo "Build fixes applied successfully"
 
