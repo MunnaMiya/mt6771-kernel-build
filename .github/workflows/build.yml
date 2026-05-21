@@ -11,15 +11,22 @@ jobs:
       image: ubuntu:18.04
 
     steps:
-    - name: Install Dependencies
+    - name: Install Git First
       run: |
         apt-get update
-        apt-get install -y git wget curl bc bison flex \
+        apt-get install -y git ca-certificates
+
+    - name: Checkout Repo
+      uses: actions/checkout@v4
+
+    - name: Install Dependencies
+      run: |
+        apt-get install -y wget curl bc bison flex \
           build-essential libssl-dev libelf-dev \
           libncurses5-dev python3 python \
           gcc-aarch64-linux-gnu \
           binutils-aarch64-linux-gnu \
-          cpio rsync ca-certificates gnupg \
+          cpio rsync gnupg \
           clang-6.0 llvm-6.0 lld-6.0
 
     - name: Setup Clang 6
@@ -43,7 +50,6 @@ jobs:
         sed -i 's/(desc && desc->action && desc->action->name) ?/(0) ?/g' \
           kernel/irq/irqdesc.c
         echo "Fixes applied"
-        grep "desc->action" kernel/irq/irqdesc.c || echo "irqdesc fix confirmed"
 
     - name: Patch CPU OPP
       shell: python3 {0}
@@ -57,7 +63,7 @@ jobs:
             content = content.replace(old, new)
             print("CPU patch OK")
         else:
-            print("CPU patch string NOT found - check tabs vs spaces")
+            print("CPU patch NOT found")
         with open(path, "w") as f:
             f.write(content)
 
@@ -73,14 +79,16 @@ jobs:
             content = content.replace(old, new)
             print("GPU patch OK")
         else:
-            print("GPU patch string NOT found")
+            print("GPU patch NOT found")
         with open(path, "w") as f:
             f.write(content)
 
     - name: Copy Kernel Config
       run: |
+        ls -la kernel_config.txt
         cp kernel_config.txt \
           kernel-source/arch/arm64/configs/walton_defconfig
+        echo "Config copied"
 
     - name: Configure Kernel
       run: |
