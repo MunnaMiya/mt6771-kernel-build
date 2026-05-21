@@ -1,166 +1,97 @@
 name: Build MT6771 Kernel OC
-
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [ main ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-
     - name: Checkout
       uses: actions/checkout@v4
 
     - name: Install Dependencies
       run: |
         sudo apt update
-
-        sudo apt install -y \
-          git \
-          wget \
-          curl \
-          unzip \
-          bc \
-          flex \
-          bison \
-          build-essential \
+        sudo apt install -y git wget curl bc \
+          libssl-dev libelf-dev bison flex \
           gcc-aarch64-linux-gnu \
           g++-aarch64-linux-gnu \
           binutils-aarch64-linux-gnu \
-          libssl-dev \
-          libelf-dev \
-          libncurses-dev \
-          python3 \
-          cpio \
-          rsync \
-          file
+          build-essential libncurses-dev python3
 
-    - name: Download Clang 6.0
-      run: |
-        cd $HOME
-
-        wget -q \
-        https://releases.llvm.org/6.0.0/clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04.tar.xz
-
-        tar -xf clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04.tar.xz
-
-        mv clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04 clang-6.0
-
-        $HOME/clang-6.0/bin/clang --version
-
-    - name: Clone Nokia MT6771 Kernel Source
+    - name: Clone Nokia MT6771 Kernel
       run: |
         git clone --depth=1 \
-        https://github.com/nokia-dev/android_kernel_nokia_mt6771.git \
-        kernel-source
+          https://github.com/nokia-dev/android_kernel_nokia_mt6771.git \
+          kernel-source
 
-    - name: Fix Old Kernel Toolchain Issues
+    - name: Fix DTC yylloc bug
       run: |
-        sed -i 's/extern YYLTYPE yylloc;/YYLTYPE yylloc;/g' \
-        kernel-source/scripts/dtc/dtc-lexer.l || true
+        sed -i 's/YYLTYPE yylloc/extern YYLTYPE yylloc/' \
+          kernel-source/scripts/dtc/dtc-lexer.lex.c_shipped
 
-    - name: Apply CPU Patch
+    - name: Patch CPU OPP
       shell: python3 {0}
       run: |
         path = "kernel-source/drivers/misc/mediatek/base/power/cpufreq_v1/src/mach/mt6771/mtk_cpufreq_platform.c"
-
         with open(path, "r") as f:
             content = f.read()
-
         old = "unsigned int _mt_cpufreq_get_cpu_level(void)\n{\n\tunsigned int lv = CPU_LEVEL_0;\n\tunsigned int temp = 0;\n\tunsigned int segcode = 0;\n\tunsigned int bincode = 0;\n\tunsigned int turbocode = 0;\n\tunsigned int a_code = 0;"
-
         new = "unsigned int _mt_cpufreq_get_cpu_level(void)\n{\n\tturbo_flag = 0;\n\treturn CPU_LEVEL_0;\n\tunsigned int lv = CPU_LEVEL_0;\n\tunsigned int temp = 0;\n\tunsigned int segcode = 0;\n\tunsigned int bincode = 0;\n\tunsigned int turbocode = 0;\n\tunsigned int a_code = 0;"
-
         if old in content:
             content = content.replace(old, new)
-            print("CPU patch applied successfully")
+            print("CPU patch applied OK")
         else:
             print("CPU patch string NOT found")
-
         with open(path, "w") as f:
             f.write(content)
 
-    - name: Apply GPU Patch
+    - name: Patch GPU Segment
       shell: python3 {0}
       run: |
         path = "kernel-source/drivers/misc/mediatek/base/power/mt6771/mtk_gpufreq_core.c"
-
         with open(path, "r") as f:
             content = f.read()
-
         old = "\tif (g_efuse_speed_bound_id == 0x03000000) {\n\t\t/* 900MHz Version */\n\t\tg_segment_id = MT6771_SEGMENT_1;\n\t} else if (g_efuse_speed_bound_id == 0x05000000) {\n\t\t/* 800MHz Version */\n\t\tg_segment_id = MT6771_SEGMENT_2;\n\t} else if (g_efuse_speed_bound_id == 0x07000000) {\n\t\t/* 700MHz Version */\n\t\tg_segment_id = MT6771_SEGMENT_3;\n\t} else if (g_efuse_speed_bound_id == 0x02000000 && g_efuse_turbo_id == 0x00000008) {\n\t\t/* 900MHz Version */\n\t\tg_segment_id = MT6771_SEGMENT_4;\n\t} else {\n\t\t/* Other Version, set default segment */\n\t\tg_segment_id = MT6771_SEGMENT_2;\n\t}"
-
         new = "\t/* OC patch: force Segment 1 = 900MHz GPU */\n\tg_segment_id = MT6771_SEGMENT_1;"
-
         if old in content:
             content = content.replace(old, new)
-            print("GPU patch applied successfully")
+            print("GPU patch applied OK")
         else:
             print("GPU patch string NOT found")
-
         with open(path, "w") as f:
             f.write(content)
 
     - name: Copy Kernel Config
       run: |
         cp kernel_config.txt \
-        kernel-source/arch/arm64/configs/walton_defconfig
-
-        wc -l \
-        kernel-source/arch/arm64/configs/walton_defconfig
+          kernel-source/arch/arm64/configs/walton_defconfig
+        wc -l kernel-source/arch/arm64/configs/walton_defconfig
 
     - name: Configure Kernel
       run: |
         cd kernel-source
-
         make ARCH=arm64 \
-          CC=$HOME/clang-6.0/bin/clang \
-          CROSS_COMPILE=aarch64-linux-gnu- \
-          LLVM_IAS=0 \
-          HOSTCFLAGS="-fcommon" \
-          walton_defconfig
-
-        make ARCH=arm64 \
-          LLVM_IAS=0 \
-          HOSTCFLAGS="-fcommon" \
-          olddefconfig
+             CROSS_COMPILE=aarch64-linux-gnu- \
+             walton_defconfig
 
     - name: Build Kernel
       run: |
         cd kernel-source
-
         make ARCH=arm64 \
-          CC=$HOME/clang-6.0/bin/clang \
-          CROSS_COMPILE=aarch64-linux-gnu- \
-          CLANG_TRIPLE=aarch64-linux-gnu- \
-          LLVM_IAS=0 \
-          HOSTCFLAGS="-fcommon" \
-          -j4 \
-          Image.gz 2>&1 | tee build.log
+             CROSS_COMPILE=aarch64-linux-gnu- \
+             -j$(nproc) Image.gz 2>&1 | tee build.log
+        echo "Exit code: $?"
+        ls -lh arch/arm64/boot/Image.gz 2>/dev/null || echo "FAILED: Image.gz not found"
 
-        echo "=============================="
-        echo "BOOT OUTPUT FILES"
-        echo "=============================="
-
-        find arch/arm64/boot/ -type f
-
-        echo "=============================="
-        echo "CHECK KERNEL"
-        echo "=============================="
-
-        ls -lh arch/arm64/boot/Image.gz || true
-
-    - name: Upload Artifact
+    - name: Upload Kernel
       uses: actions/upload-artifact@v4
       if: always()
-
       with:
         name: kernel-oc
-
         path: |
           kernel-source/arch/arm64/boot/Image.gz
           kernel-source/build.log
