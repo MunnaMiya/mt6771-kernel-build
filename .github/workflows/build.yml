@@ -1,10 +1,12 @@
 name: Build MT6771 Kernel OC
 on:
   workflow_dispatch:
+  push:
+    branches: [ main ]
 
 jobs:
   build:
-    runs-on: ubuntu-20.04 # ওল্ড টুলচেনের জন্য Ubuntu 20.04 বেশি স্টেবল
+    runs-on: ubuntu-latest
 
     steps:
     - name: Checkout
@@ -13,22 +15,23 @@ jobs:
     - name: Install Dependencies
       run: |
         sudo apt update
+        # ল্যাটেস্ট উবুন্টুতে ওল্ড টুলচেন রান করার জন্য libncurses5 ও libtinfo5 প্রয়োজন
         sudo apt install -y git wget curl bc \
           libssl-dev libelf-dev bison flex \
           build-essential libncurses-dev python3 \
-          zip unzip liblz4-tool lz4
-          
+          zip unzip liblz4-tool lz4 libncurses5 libtinfo5
+
     - name: Download AOSP Clang & GCC Toolchains
       run: |
         mkdir -p $GITHUB_WORKSPACE/toolchains
         cd $GITHUB_WORKSPACE/toolchains
         
-        # Download AOSP Clang 10.0.4 (MTK 4.4 কার্নেলের জন্য বেস্ট এবং বাগ-ফ্রি)
+        # Download AOSP Clang 10.0.4 (MTK 4.4 কার্নেলের জন্য পারফেক্ট)
         echo "Downloading Clang..."
         wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/android-10.0.4/clang-r353392d.tar.gz
         mkdir clang && tar -xf clang-r353392d.tar.gz -C clang
         
-        # Download GCC Aarch64 & ARM for Sub-Architecture Linking
+        # Download GCC Aarch64 & ARM
         echo "Downloading GCC Aarch64..."
         git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b pie-release gcc64
         echo "Downloading GCC ARM..."
@@ -45,7 +48,7 @@ jobs:
         cd kernel-source
         sed -i 's/ -Werror//g' Makefile
         sed -i 's/ -Werror//g' arch/arm64/Makefile
-        # ওল্ড স্ক্রিপ্ট ও ডুপ্লিকেট YYLTYPE ডিক্লারেশন ফিক্স
+        # ডুপ্লিকেট YYLTYPE ডিক্লারেশন ফিক্স (যা ল্যাটেস্ট হোস্ট কম্পাইলারে এরর দেয়)
         sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped
         echo "Build fixes applied"
 
@@ -56,7 +59,6 @@ jobs:
         with open(path, "r") as f:
             content = f.read()
         
-        # ক্লিন অ্যান্ড অল্টারনেটিভ ম্যাচিং (যদি আগের স্ট্রিং স্পেসের জন্য মিস হয়ে থাকে)
         old = "unsigned int _mt_cpufreq_get_cpu_level(void)\n{"
         new = "unsigned int _mt_cpufreq_get_cpu_level(void)\n{\n\tturbo_flag = 0;\n\treturn CPU_LEVEL_0;"
         
@@ -64,7 +66,7 @@ jobs:
             content = content.replace(old, new)
             print("CPU patch applied OK")
         else:
-            print("CPU patch target NOT found! Check file content.")
+            print("CPU patch target NOT found!")
         with open(path, "w") as f:
             f.write(content)
 
@@ -75,10 +77,7 @@ jobs:
         with open(path, "r") as f:
             content = f.read()
         
-        # এফিউজ বাইপাস করে সরাসরি সেগমেন্ট ১ (সর্বোচ্চ ক্লক) ফোর্স করা
-        target_str = "g_segment_id = MT6771_SEGMENT_2;" # অথবা মূল ফাংশন এন্ট্রি ট্র্যাকিং
         if "g_efuse_speed_bound_id" in content:
-            # সহজ এবং সেফ মেথড: পুরো কন্ডিশন ব্লকের পর ভ্যালু ওভাররাইট করা
             content = content.replace("g_segment_id = MT6771_SEGMENT_2;", "g_segment_id = MT6771_SEGMENT_1;")
             content = content.replace("g_segment_id = MT6771_SEGMENT_3;", "g_segment_id = MT6771_SEGMENT_1;")
             content = content.replace("g_segment_id = MT6771_SEGMENT_4;", "g_segment_id = MT6771_SEGMENT_1;")
@@ -90,11 +89,9 @@ jobs:
 
     - name: Copy Kernel Config
       run: |
-        # যদি তোমার রিপোজিটরির রুটে kernel_config.txt থাকে, তবে এটা ঠিকঠাক কাজ করবে
         if [ -f kernel_config.txt ]; then
           cp kernel_config.txt kernel-source/arch/arm64/configs/walton_defconfig
         else
-          # যদি ফাইল না থাকে তবে ওই সোর্সের ডিফল্ট mt6771_defconfig ব্যাকআপ হিসেবে ইউজ হবে
           cp kernel-source/arch/arm64/configs/mt6771_defconfig kernel-source/arch/arm64/configs/walton_defconfig
         fi
 
@@ -102,17 +99,16 @@ jobs:
       run: |
         cd kernel-source
         
-        # পাথ এনভায়রনমেন্ট সেটআপ
+        # এনভায়রনমেন্ট এবং পাথ সেটআপ
         COMPILER_PATH=$GITHUB_WORKSPACE/toolchains/clang/bin:$GITHUB_WORKSPACE/toolchains/gcc64/bin:$GITHUB_WORKSPACE/toolchains/gcc32/bin:$PATH
-        
         export PATH=$COMPILER_PATH
         export ARCH=arm64
         export SUBARCH=arm64
         
-        # কনফিগারেশন রান করা
+        # কনফিগ জেনারেট করা
         make O=out walton_defconfig
         
-        # মেইন বিল্ড প্রোসেস (AOSP Clang + GCC wrappers)
+        # মেইন কমপিলিং রান (AOSP Clang + GCC লিংকার)
         make -j$(nproc) O=out \
           CC=clang \
           CLANG_TRIPLE=aarch64-linux-gnu- \
@@ -134,7 +130,7 @@ jobs:
         fi
 
     - name: Upload Kernel Output
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-archive@v4
       if: always()
       with:
         name: Walton-RX7-Mini-OC-Kernel
