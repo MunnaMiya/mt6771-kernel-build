@@ -279,20 +279,49 @@ jobs:
         echo "Kernel config copied to walton_defconfig"
         wc -l kernel-source/arch/arm64/configs/walton_defconfig
 
+    - name: Install libtinfo5 for Clang-6
+      run: |
+        # Install libtinfo.so.5 required by clang-6
+        wget -q "http://archive.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.4-2_amd64.deb" \
+          -O /tmp/libtinfo5.deb 2>&1 || \
+        wget -q "http://security.ubuntu.com/ubuntu/pool/main/n/ncurses/libtinfo5_6.4-2_amd64.deb" \
+          -O /tmp/libtinfo5.deb 2>&1 || {
+          echo "Downloading from old releases..."
+          wget -q "http://old-releases.ubuntu.com/ubuntu/pool/main/n/ncurses/libtinfo5_6.1-1ubuntu1.18.04_amd64.deb" \
+            -O /tmp/libtinfo5.deb
+        }
+        
+        if [ -f /tmp/libtinfo5.deb ] && [ -s /tmp/libtinfo5.deb ]; then
+          sudo dpkg -i /tmp/libtinfo5.deb 2>/dev/null || {
+            sudo apt-get install -f -y
+            sudo dpkg -i /tmp/libtinfo5.deb
+          }
+          echo "libtinfo5 installed successfully"
+        else
+          echo "WARNING: Could not download libtinfo5, clang-6 may not work"
+        fi
+
     - name: Configure and Build Kernel
       run: |
         cd kernel-source
         
-        # Setup clang path
+        # Setup clang path - try downloaded clang-6 first, fall back to system
         CLANG_DIR="${CLANG_DIR:-/usr/bin}"
         CLANG_BIN="${CLANG_DIR}/clang"
         
-        if [ ! -f "$CLANG_BIN" ] || [ ! -x "$CLANG_BIN" ]; then
+        # Test if clang-6 works, if not use system clang
+        if [ -f "$CLANG_BIN" ] && [ -x "$CLANG_BIN" ]; then
+          if $CLANG_BIN --version >/dev/null 2>&1; then
+            echo "Using clang-6: $CLANG_BIN"
+            $CLANG_BIN --version 2>&1 | head -1
+          else
+            echo "clang-6 failed to run, falling back to system clang"
+            CLANG_BIN="clang"
+          fi
+        else
+          echo "clang-6 not found, using system clang"
           CLANG_BIN="clang"
         fi
-        
-        echo "Using clang: $CLANG_BIN"
-        $CLANG_BIN --version 2>&1 | head -1 || echo "Version check failed"
         
         export ARCH=arm64
         export CROSS_COMPILE=aarch64-linux-gnu-
@@ -303,7 +332,7 @@ jobs:
         echo "Configuring kernel..."
         echo "========================================="
         
-        # Configure in-tree (not O=out)
+        # Configure
         make walton_defconfig
         
         echo ""
@@ -311,19 +340,20 @@ jobs:
         
         # Show important config options
         echo "=== Key Config Options ==="
-        grep -E "CPU_FREQ|GPU_FREQ|THERMAL|OVERCLOCK|MT6771|MTK_" .config | head -25
+        grep -E "CPU_FREQ|GPU_FREQ|THERMAL|OVERCLOCK|MT6771|MTK_" .config | head -25 || true
         
         echo ""
         echo "========================================="
         echo "Building kernel..."
-        echo "Compiler: $($CLANG_BIN --version 2>&1 | head -1)"
+        echo "Compiler: $CLANG_BIN"
         echo "Jobs: $(nproc)"
         echo "========================================="
         
-        # Build in-tree
+        # Build with proper flags
+        # KCFLAGS only for kernel code, not host tools
+        # HOSTCFLAGS for host tools compiled with gcc
         make -j$(nproc) \
              HOSTCFLAGS="-fcommon" \
-             KCFLAGS="-Wno-error -Wno-implicit-fallthrough -fno-integrated-as" \
              Image.gz 2>&1 | tee build.log
         
         BUILD_EXIT=${PIPESTATUS[0]}
@@ -347,7 +377,7 @@ jobs:
           echo "========================================="
           echo ""
           echo "=== Errors ==="
-          grep -i "error:" build.log | grep -v "Werror" | head -30
+          grep -i "error:" build.log | head -30
           echo ""
           echo "=== Last 30 lines ==="
           tail -30 build.log
