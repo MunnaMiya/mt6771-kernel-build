@@ -28,11 +28,12 @@ jobs:
         clang --version
 
     - name: Get kernel_config from repo
+      env:
+        TOKEN: ${{ github.token }}
       run: |
         git clone --depth=1 \
-          https://github.com/${{ github.repository }}.git \
+          https://x-access-token:${TOKEN}@github.com/${{ github.repository }}.git \
           myrepo
-        ls myrepo/
         cp myrepo/kernel_config.txt ./kernel_config.txt
         echo "kernel_config.txt ready"
         wc -l kernel_config.txt
