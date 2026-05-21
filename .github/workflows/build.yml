@@ -56,12 +56,14 @@ jobs:
         sed -i 's/(desc && desc->action && desc->action->name) ?/(0) ?/g' \
           kernel/irq/irqdesc.c
 
-        # Fix: Add drivers/devfreq to include path so helio-dvfsrc.h can be found
-        DEVFREQ_MAKEFILE="drivers/devfreq/Makefile"
-        if ! grep -q "ccflags-y += -I\$(srctree)/drivers/devfreq" "$DEVFREQ_MAKEFILE"; then
-          sed -i '1i ccflags-y += -I$(srctree)/drivers/devfreq' "$DEVFREQ_MAKEFILE"
-          echo "Added drivers/devfreq to include path"
-        fi
+        # Add include paths for missing headers
+        # helio-dvfsrc.h (drivers/devfreq)
+        sed -i '1i ccflags-y += -I$(srctree)/drivers/devfreq' \
+          drivers/devfreq/Makefile
+
+        # mtk_cm_mgr.h (cm_mgr_v1)
+        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/cm_mgr_v1' \
+          drivers/misc/mediatek/base/power/cm_mgr_v1/Makefile
 
         echo "Fixes applied"
 
@@ -132,7 +134,7 @@ jobs:
         fi
 
     - name: Upload Kernel
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v3
       if: always()
       with:
         name: kernel-oc
