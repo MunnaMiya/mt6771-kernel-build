@@ -20,7 +20,9 @@ jobs:
           gcc-aarch64-linux-gnu \
           g++-aarch64-linux-gnu \
           binutils-aarch64-linux-gnu \
-          build-essential libncurses-dev python3
+          build-essential libncurses-dev python3 \
+          gcc-10-aarch64-linux-gnu \
+          g++-10-aarch64-linux-gnu
 
     - name: Clone Nokia MT6771 Kernel
       run: |
@@ -28,10 +30,12 @@ jobs:
           https://github.com/nokia-dev/android_kernel_nokia_mt6771.git \
           kernel-source
 
-    - name: Fix DTC yylloc bug
+    - name: Fix Build Issues
       run: |
         sed -i 's/YYLTYPE yylloc/extern YYLTYPE yylloc/' \
           kernel-source/scripts/dtc/dtc-lexer.lex.c_shipped
+        sed -i 's/ -Werror//g' kernel-source/Makefile
+        sed -i 's/ -Werror//g' kernel-source/arch/arm64/Makefile
 
     - name: Patch CPU OPP
       shell: python3 {0}
@@ -76,6 +80,7 @@ jobs:
         cd kernel-source
         make ARCH=arm64 \
              CROSS_COMPILE=aarch64-linux-gnu- \
+             CC=aarch64-linux-gnu-gcc-10 \
              walton_defconfig
 
     - name: Build Kernel
@@ -83,6 +88,8 @@ jobs:
         cd kernel-source
         make ARCH=arm64 \
              CROSS_COMPILE=aarch64-linux-gnu- \
+             CC=aarch64-linux-gnu-gcc-10 \
+             KCFLAGS="-Wno-error -Wno-attribute-alias -Wno-stringop-overflow -Wno-array-bounds" \
              -j$(nproc) Image.gz 2>&1 | tee build.log
         echo "Exit code: $?"
         ls -lh arch/arm64/boot/Image.gz 2>/dev/null || echo "FAILED: Image.gz not found"
