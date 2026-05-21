@@ -7,15 +7,14 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    container:
+      image: ubuntu:18.04
 
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-
     - name: Install Dependencies
       run: |
-        sudo apt-get update
-        sudo apt-get install -y \
+        apt-get update
+        apt-get install -y \
           git \
           wget \
           curl \
@@ -25,54 +24,28 @@ jobs:
           build-essential \
           libssl-dev \
           libelf-dev \
-          libncurses-dev \
+          libncurses5-dev \
           python3 \
+          python \
           gcc-aarch64-linux-gnu \
           binutils-aarch64-linux-gnu \
           cpio \
-          rsync
+          rsync \
+          ca-certificates \
+          gnupg \
+          clang-6.0 \
+          llvm-6.0 \
+          lld-6.0
 
-    - name: Download Google Clang 6.0.2
+    - name: Setup Clang-6
       run: |
-        mkdir -p ~/clang-toolchain
-        cd ~/clang-toolchain
+        # Create symlinks for clang-6
+        update-alternatives --install /usr/bin/clang clang /usr/bin/clang-6.0 100
+        update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-6.0 100
+        update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-6.0 100
         
-        echo "Attempting to download clang 6.0.2..."
-        
-        # Try to download prebuilt clang 6
-        wget -q --show-progress \
-          "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-9.0.0_r3/clang-4691093.tar.gz" \
-          -O clang6.tar.gz 2>&1 || \
-        wget -q --show-progress \
-          "https://github.com/nickelio/clang-6.0.2/releases/download/v1/clang-6.0.2-aarch64-linux.tar.gz" \
-          -O clang6.tar.gz 2>&1 || {
-          echo "WARNING: Could not download clang-6, will use system clang"
-          touch clang6.tar.gz
-        }
-        
-        if [ -s clang6.tar.gz ]; then
-          echo "Extracting clang 6..."
-          tar -xzf clang6.tar.gz 2>/dev/null || true
-          
-          # Find the clang binary
-          CLANG_BIN=$(find . -name "clang" -type f -executable 2>/dev/null | grep -v "clang++" | head -1)
-          
-          if [ -n "$CLANG_BIN" ]; then
-            echo "Found clang binary at: $CLANG_BIN"
-            CLANG_DIR=$(dirname "$CLANG_BIN")
-            echo "$(realpath $CLANG_DIR)" > ~/clang-toolchain/clang_path.txt
-            echo "CLANG_DIR=$(realpath $CLANG_DIR)" >> $GITHUB_ENV
-            
-            # Test clang
-            "$CLANG_BIN" --version 2>&1 || echo "Clang version check failed but continuing"
-          else
-            echo "No clang binary found in archive"
-            echo "CLANG_DIR=/usr/bin" >> $GITHUB_ENV
-          fi
-        else
-          echo "Using system clang as fallback"
-          echo "CLANG_DIR=/usr/bin" >> $GITHUB_ENV
-        fi
+        echo "Clang version:"
+        clang --version
 
     - name: Clone Nokia MT6771 Kernel
       run: |
@@ -88,13 +61,13 @@ jobs:
         find . -type f \( -name "Makefile" -o -name "Kbuild" \) \
           -exec sed -i 's/-Werror//g' {} + 2>/dev/null || true
         
-        # Fix dtc lexer issue (YYLTYPE undeclared)
+        # Fix dtc lexer issue
         if [ -f scripts/dtc/dtc-lexer.lex.c_shipped ]; then
           sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' \
             scripts/dtc/dtc-lexer.lex.c_shipped
         fi
         
-        # Fix -fcommon issue for GCC 10+
+        # Fix -fcommon issue
         sed -i 's/-fno-common/-fcommon/g' Makefile 2>/dev/null || true
         sed -i 's/-fno-common/-fcommon/g' arch/arm64/Makefile 2>/dev/null || true
         
@@ -108,12 +81,10 @@ jobs:
         
         if [ ! -f "$CPU_FILE" ]; then
           echo "ERROR: CPU frequency file not found at $CPU_FILE"
-          echo "Searching for alternative location..."
           find . -name "mtk_cpufreq_platform.c" -type f
           exit 1
         fi
         
-        # Create backup
         cp "$CPU_FILE" "${CPU_FILE}.backup"
         
         python3 << 'PYEOF'
@@ -122,7 +93,6 @@ jobs:
         with open(path, "r") as f:
             content = f.read()
         
-        # Try multiple patterns for the function
         patterns = [
             "unsigned int _mt_cpufreq_get_cpu_level(void)\n{\n\tunsigned int lv = CPU_LEVEL_0;",
             "unsigned int _mt_cpufreq_get_cpu_level(void)\n{\n\tunsigned int lv = CPU_LEVEL_0",
@@ -140,7 +110,6 @@ jobs:
         
         if not patched:
             print("WARNING: Standard patterns not found")
-            # Find the function and show context
             idx = content.find("_mt_cpufreq_get_cpu_level")
             if idx > 0:
                 snippet = content[max(0,idx-50):idx+300]
@@ -154,8 +123,6 @@ jobs:
         PYEOF
         
         echo "CPU patch completed"
-        
-        # Show patch result
         grep -A3 "_mt_cpufreq_get_cpu_level" "$CPU_FILE" | head -5
 
     - name: Patch GPU for 900MHz
@@ -166,12 +133,10 @@ jobs:
         
         if [ ! -f "$GPU_FILE" ]; then
           echo "ERROR: GPU frequency file not found at $GPU_FILE"
-          echo "Searching for alternative location..."
           find . -name "mtk_gpufreq_core.c" -type f
           exit 1
         fi
         
-        # Create backup
         cp "$GPU_FILE" "${GPU_FILE}.backup"
         
         python3 << 'PYEOF'
@@ -180,19 +145,14 @@ jobs:
         with open(path, "r") as f:
             content = f.read()
         
-        # Find and force GPU segment to 900MHz
         old = "if (g_efuse_speed_bound_id == 0x03000000)"
         
         if old in content:
-            # Find the start of this if-block
             idx = content.find(old)
-            # Find the entire segment determination logic
             segment_start = content.rfind("\tif (g_efuse_speed_bound_id", 0, idx+100)
             if segment_start < 0:
                 segment_start = idx
             
-            # Find where the segment assignment block ends
-            # Look for the closing brace after the else block
             search_start = idx
             brace_count = 0
             block_end = search_start
@@ -207,7 +167,6 @@ jobs:
                         break
             
             if block_end > search_start:
-                # Replace the entire segment detection with force assignment
                 old_block = content[segment_start:block_end]
                 new_block = "\t/* OC: Force Segment 1 = 900MHz GPU */\n\tg_segment_id = MT6771_SEGMENT_1;\n"
                 
@@ -216,14 +175,12 @@ jobs:
                 print(f"Replaced {len(old_block)} chars with force assignment")
             else:
                 print("WARNING: Could not find end of segment block")
-                # Just insert override before the if statement
                 override = "\t/* OC: Force Segment 1 = 900MHz GPU */\n\tg_segment_id = MT6771_SEGMENT_1;\n\treturn;\n\n"
                 content = content[:segment_start] + override + content[segment_start:]
                 print("Inserted override before segment detection")
         else:
             print("WARNING: Expected GPU segment pattern not found")
             if "MT6771_SEGMENT" in content:
-                print("Found segment references, showing context:")
                 for i, line in enumerate(content.split('\n')):
                     if 'MT6771_SEGMENT' in line:
                         print(f"  Line {i+1}: {line.strip()}")
@@ -233,8 +190,6 @@ jobs:
         PYEOF
         
         echo "GPU patch completed"
-        
-        # Show patch result
         grep -B1 -A3 "OC:" "$GPU_FILE" || echo "Patch verification line not found"
 
     - name: Create Kernel Config
@@ -242,12 +197,9 @@ jobs:
         if [ ! -f kernel_config.txt ]; then
           echo "Creating default kernel config for MT6771..."
           cat > kernel_config.txt << 'EOF'
-        # Base architecture
         CONFIG_ARM64=y
         CONFIG_ARCH_MEDIATEK=y
         CONFIG_MACH_MT6771=y
-        
-        # CPU Frequency scaling
         CONFIG_CPU_FREQ=y
         CONFIG_CPU_FREQ_STAT=y
         CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE=y
@@ -257,19 +209,13 @@ jobs:
         CONFIG_CPU_FREQ_GOV_ONDEMAND=y
         CONFIG_CPU_FREQ_GOV_INTERACTIVE=y
         CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y
-        
-        # MediaTek CPU/GPU frequency
         CONFIG_MTK_CPU_FREQ=y
         CONFIG_MTK_GPU_FREQ=y
         CONFIG_MTK_GPU_OVERSHOOT=y
         CONFIG_MTK_GPU_SUPPORT=y
-        
-        # Thermal
         CONFIG_THERMAL=y
         CONFIG_MTK_THERMAL=y
         CONFIG_CPU_THERMAL=y
-        
-        # Enable /proc/config.gz
         CONFIG_IKCONFIG=y
         CONFIG_IKCONFIG_PROC=y
         EOF
@@ -277,81 +223,32 @@ jobs:
         
         cp kernel_config.txt kernel-source/arch/arm64/configs/walton_defconfig
         echo "Kernel config copied to walton_defconfig"
-        wc -l kernel-source/arch/arm64/configs/walton_defconfig
-
-    - name: Install libtinfo5 for Clang-6
-      run: |
-        # Install libtinfo.so.5 required by clang-6
-        wget -q "http://archive.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.4-2_amd64.deb" \
-          -O /tmp/libtinfo5.deb 2>&1 || \
-        wget -q "http://security.ubuntu.com/ubuntu/pool/main/n/ncurses/libtinfo5_6.4-2_amd64.deb" \
-          -O /tmp/libtinfo5.deb 2>&1 || {
-          echo "Downloading from old releases..."
-          wget -q "http://old-releases.ubuntu.com/ubuntu/pool/main/n/ncurses/libtinfo5_6.1-1ubuntu1.18.04_amd64.deb" \
-            -O /tmp/libtinfo5.deb
-        }
-        
-        if [ -f /tmp/libtinfo5.deb ] && [ -s /tmp/libtinfo5.deb ]; then
-          sudo dpkg -i /tmp/libtinfo5.deb 2>/dev/null || {
-            sudo apt-get install -f -y
-            sudo dpkg -i /tmp/libtinfo5.deb
-          }
-          echo "libtinfo5 installed successfully"
-        else
-          echo "WARNING: Could not download libtinfo5, clang-6 may not work"
-        fi
 
     - name: Configure and Build Kernel
       run: |
         cd kernel-source
         
-        # Setup clang path - try downloaded clang-6 first, fall back to system
-        CLANG_DIR="${CLANG_DIR:-/usr/bin}"
-        CLANG_BIN="${CLANG_DIR}/clang"
-        
-        # Test if clang-6 works, if not use system clang
-        if [ -f "$CLANG_BIN" ] && [ -x "$CLANG_BIN" ]; then
-          if $CLANG_BIN --version >/dev/null 2>&1; then
-            echo "Using clang-6: $CLANG_BIN"
-            $CLANG_BIN --version 2>&1 | head -1
-          else
-            echo "clang-6 failed to run, falling back to system clang"
-            CLANG_BIN="clang"
-          fi
-        else
-          echo "clang-6 not found, using system clang"
-          CLANG_BIN="clang"
-        fi
-        
         export ARCH=arm64
         export CROSS_COMPILE=aarch64-linux-gnu-
-        export CC="$CLANG_BIN"
+        export CC=clang-6.0
         export CLANG_TRIPLE=aarch64-linux-gnu-
         
         echo "========================================="
         echo "Configuring kernel..."
+        echo "Compiler: $(clang-6.0 --version | head -1)"
         echo "========================================="
         
-        # Configure
         make walton_defconfig
         
         echo ""
         echo "Configuration complete"
-        
-        # Show important config options
-        echo "=== Key Config Options ==="
-        grep -E "CPU_FREQ|GPU_FREQ|THERMAL|OVERCLOCK|MT6771|MTK_" .config | head -25 || true
+        grep -E "CPU_FREQ|GPU_FREQ|MT6771" .config | head -20 || true
         
         echo ""
         echo "========================================="
         echo "Building kernel..."
-        echo "Compiler: $CLANG_BIN"
-        echo "Jobs: $(nproc)"
         echo "========================================="
         
-        # Build with proper flags
-        # KCFLAGS only for kernel code, not host tools
-        # HOSTCFLAGS for host tools compiled with gcc
         make -j$(nproc) \
              HOSTCFLAGS="-fcommon" \
              Image.gz 2>&1 | tee build.log
@@ -368,8 +265,7 @@ jobs:
           echo "========================================="
           ls -lh arch/arm64/boot/Image.gz
           echo ""
-          echo "Kernel version string:"
-          strings arch/arm64/boot/Image.gz | grep "Linux version" || echo "Could not extract version"
+          strings arch/arm64/boot/Image.gz | grep "Linux version" || true
         else
           echo ""
           echo "========================================="
