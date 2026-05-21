@@ -28,12 +28,11 @@ jobs:
         mkdir -p $GITHUB_WORKSPACE/toolchains
         cd $GITHUB_WORKSPACE/toolchains
         
-        # Download AOSP Clang 10.0.4 (MTK 4.4 কার্নেলের জন্য পারফেক্ট)
-        echo "Downloading Clang..."
-        wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/android-10.0.4/clang-r353392d.tar.gz
-        mkdir clang && tar -xf clang-r353392d.tar.gz -C clang
+        # ৪MD বা সার্ভার এরর এড়াতে Proton Clang ক্লোন করা হচ্ছে (যা MTK 4.4 ও ওল্ড কার্নেলের জন্য হাইলি অপ্টিমাইজড)
+        echo "Cloning Stable Proton Clang..."
+        git clone --depth=1 https://github.com/kdrag0n/proton-clang.git clang
         
-        # Download GCC Aarch64 & ARM
+        # Download GCC Aarch64 & ARM (লিংক ব্যাকআপ হিসেবে অফিশিয়াল রিপোজিটরি ব্যবহার)
         echo "Downloading GCC Aarch64..."
         git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b pie-release gcc64
         echo "Downloading GCC ARM..."
@@ -50,7 +49,7 @@ jobs:
         cd kernel-source
         sed -i 's/ -Werror//g' Makefile
         sed -i 's/ -Werror//g' arch/arm64/Makefile
-        # ডুপ্লিকেট YYLTYPE ডিক্লারেশন ফিক্স (যা ল্যাটেস্ট হোস্ট কম্পাইলারে এরর দেয়)
+        # ডুপ্লিকেট YYLTYPE ডিক্লারেশন ফিক্স
         sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped
         echo "Build fixes applied"
 
@@ -107,15 +106,17 @@ jobs:
         export ARCH=arm64
         export SUBARCH=arm64
         
+        # Proton Clang-এর জন্য এক্সপোর্টেড ফ্ল্যাগস (ওল্ড কার্নেল কম্পাইল সাকসেস করার জন্য)
+        export CC=clang
+        export CLANG_TRIPLE=aarch64-linux-gnu-
+        export CROSS_COMPILE=aarch64-linux-android-
+        export CROSS_COMPILE_ARM32=arm-linux-androideabi-
+        
         # কনফিগ জেনারেট করা
         make O=out walton_defconfig
         
-        # মেইন কমপিলিং রান (AOSP Clang + GCC লিংকার)
+        # মেইন কমপিলিং রান (Proton Clang + LD Gold/LLVM Linker)
         make -j$(nproc) O=out \
-          CC=clang \
-          CLANG_TRIPLE=aarch64-linux-gnu- \
-          CROSS_COMPILE=aarch64-linux-android- \
-          CROSS_COMPILE_ARM32=arm-linux-androideabi- \
           HOSTCFLAGS="-fcommon" \
           KCFLAGS="-fcommon -Wno-error" 2>&1 | tee build.log
           
