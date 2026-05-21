@@ -57,29 +57,21 @@ jobs:
           kernel/irq/irqdesc.c
 
         # --- Add include paths for missing headers ---
-        # helio-dvfsrc.h (drivers/devfreq)
         sed -i '1i ccflags-y += -I$(srctree)/drivers/devfreq' \
           drivers/devfreq/Makefile
-
-        # mtk_cm_mgr.h (cm_mgr_v1)
         sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/cm_mgr_v1' \
           drivers/misc/mediatek/base/power/cm_mgr_v1/Makefile
-
-        # mtk_gpufreq.h (mt6771 power directory)
         sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/mt6771' \
           drivers/misc/mediatek/base/power/mt6771/Makefile
-
-        # mtk_ppm_platform.h (ppm_v3 mt6771 platform directory)
         sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/ppm_v3/src/mach/mt6771' \
           drivers/misc/mediatek/base/power/ppm_v3/src/mach/mt6771/Makefile
-
-        # mtk_spm_sleep_internal.h (spm_v4 directory)
         sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/spm_v4' \
           drivers/misc/mediatek/base/power/spm_v4/Makefile
-
-        # mtk_swpm_platform.h (swpm_v1 mt6771 directory)
         sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/swpm_v1/mt6771' \
           drivers/misc/mediatek/base/power/swpm_v1/mt6771/Makefile
+        # New: camera ISP isp_50 directory for met_events_camsys.h
+        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/cameraisp/src/isp_50' \
+          drivers/misc/mediatek/cameraisp/src/isp_50/Makefile
 
         echo "Fixes applied"
 
