@@ -14,35 +14,17 @@ jobs:
     - name: Install Dependencies
       run: |
         apt-get update
-        apt-get install -y \
-          git \
-          wget \
-          curl \
-          bc \
-          bison \
-          flex \
-          build-essential \
-          libssl-dev \
-          libelf-dev \
-          libncurses5-dev \
-          python3 \
-          python \
+        apt-get install -y git wget curl bc bison flex \
+          build-essential libssl-dev libelf-dev \
+          libncurses5-dev python3 python \
           gcc-aarch64-linux-gnu \
           binutils-aarch64-linux-gnu \
-          cpio \
-          rsync \
-          ca-certificates \
-          gnupg \
-          clang-6.0 \
-          llvm-6.0 \
-          lld-6.0
+          cpio rsync ca-certificates gnupg \
+          clang-6.0 llvm-6.0 lld-6.0
 
-    - name: Setup Clang-6
+    - name: Setup Clang 6
       run: |
         update-alternatives --install /usr/bin/clang clang /usr/bin/clang-6.0 100
-        update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-6.0 100
-        update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-6.0 100
-        echo "Clang version:"
         clang --version
 
     - name: Clone Nokia MT6771 Kernel
@@ -51,304 +33,90 @@ jobs:
           https://github.com/nokia-dev/android_kernel_nokia_mt6771.git \
           kernel-source
 
-    - name: Apply Build Fixes
+    - name: Fix Build Issues
       run: |
         cd kernel-source
-        
-        # Remove all -Werror
         find . -type f \( -name "Makefile" -o -name "Kbuild" \) \
           -exec sed -i 's/-Werror//g' {} + 2>/dev/null || true
-        
-        # Remove problematic -Wimplicit-function-declaration flag
-        echo "Stripping implicit-function-declaration flags..."
-        grep -rl "implicit-function-declaration" . 2>/dev/null | while read f; do
-          sed -i '/implicit-function-declaration/d' "$f"
-          echo "  Fixed: $f"
-        done
-        
-        # Fix dtc lexer issue
-        if [ -f scripts/dtc/dtc-lexer.lex.c_shipped ]; then
-          sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' \
-            scripts/dtc/dtc-lexer.lex.c_shipped
-        fi
-        
-        # Fix -fcommon issue
-        sed -i 's/-fno-common/-fcommon/g' Makefile 2>/dev/null || true
-        sed -i 's/-fno-common/-fcommon/g' arch/arm64/Makefile 2>/dev/null || true
-        
-        # Fix missing 'irq' and 'desc' variables in kernel/irq/irqdesc.c
-        python3 << 'PYEOF'
-        import re
-        
-        filepath = "kernel/irq/irqdesc.c"
-        with open(filepath, "r") as f:
-            content = f.read()
-        
-        # Find the __handle_domain_irq function and opening brace
-        func_pattern = r'(int __handle_domain_irq\([^)]*\)\s*\{)'
-        match = re.search(func_pattern, content)
-        if not match:
-            print("ERROR: Could not find __handle_domain_irq function in irqdesc.c")
-            exit(1)
-        
-        insert_point = match.end()
-        # Grab a snippet of the function body to check existing declarations
-        snippet = content[insert_point:insert_point+300]
-        
-        declarations = ""
-        if 'unsigned int irq' not in snippet and 'int irq' not in snippet:
-            declarations += "\n\tunsigned int irq = irq_find_mapping(domain, hwirq);"
-        if 'struct irq_desc *desc' not in snippet:
-            declarations += "\n\tstruct irq_desc *desc = irq_to_desc(irq);"
-        
-        if declarations:
-            content = content[:insert_point] + declarations + content[insert_point:]
-            with open(filepath, "w") as f:
-                f.write(content)
-            print("Inserted missing variable declarations in __handle_domain_irq:")
-            print(declarations.strip())
-        else:
-            print("Both 'irq' and 'desc' already declared, no change needed.")
-        PYEOF
-        
-        echo "Build fixes applied successfully"
+        sed -i '/^YYLTYPE yylloc;/s/^/extern /' \
+          scripts/dtc/dtc-lexer.lex.c_shipped 2>/dev/null || true
+        sed -i 's/(desc && desc->action && desc->action->name) ?/(0) ?/g' \
+          kernel/irq/irqdesc.c
+        echo "Fixes applied"
+        grep "desc->action" kernel/irq/irqdesc.c || echo "irqdesc fix confirmed"
 
-    - name: Patch CPU OPP for 2.0GHz
+    - name: Patch CPU OPP
+      shell: python3 {0}
       run: |
-        cd kernel-source
-        
-        CPU_FILE="drivers/misc/mediatek/base/power/cpufreq_v1/src/mach/mt6771/mtk_cpufreq_platform.c"
-        
-        if [ ! -f "$CPU_FILE" ]; then
-          echo "ERROR: CPU frequency file not found at $CPU_FILE"
-          find . -name "mtk_cpufreq_platform.c" -type f
-          exit 1
-        fi
-        
-        cp "$CPU_FILE" "${CPU_FILE}.backup"
-        
-        python3 << 'PYEOF'
-        path = "drivers/misc/mediatek/base/power/cpufreq_v1/src/mach/mt6771/mtk_cpufreq_platform.c"
-        
+        path = "kernel-source/drivers/misc/mediatek/base/power/cpufreq_v1/src/mach/mt6771/mtk_cpufreq_platform.c"
         with open(path, "r") as f:
             content = f.read()
-        
-        patterns = [
-            "unsigned int _mt_cpufreq_get_cpu_level(void)\n{\n\tunsigned int lv = CPU_LEVEL_0;",
-            "unsigned int _mt_cpufreq_get_cpu_level(void)\n{\n\tunsigned int lv = CPU_LEVEL_0",
-        ]
-        
-        replacement = "unsigned int _mt_cpufreq_get_cpu_level(void)\n{\n\t/* OC: Force highest CPU bin for 2.0GHz */\n\treturn CPU_LEVEL_0;\n\tunsigned int lv = CPU_LEVEL_0;"
-        
-        patched = False
-        for old_pattern in patterns:
-            if old_pattern in content:
-                content = content.replace(old_pattern, replacement)
-                print("SUCCESS: CPU level patch applied")
-                patched = True
-                break
-        
-        if not patched:
-            print("WARNING: Standard patterns not found")
-            idx = content.find("_mt_cpufreq_get_cpu_level")
-            if idx > 0:
-                snippet = content[max(0,idx-50):idx+300]
-                print(f"Function context:\n{snippet}")
-            else:
-                print("ERROR: Function not found at all")
-                exit(1)
-        
-        with open(path, "w") as f:
-            f.write(content)
-        PYEOF
-        
-        echo "CPU patch completed"
-        grep -A3 "_mt_cpufreq_get_cpu_level" "$CPU_FILE" | head -5
-
-    - name: Patch GPU for 900MHz
-      run: |
-        cd kernel-source
-        
-        GPU_FILE="drivers/misc/mediatek/base/power/mt6771/mtk_gpufreq_core.c"
-        
-        if [ ! -f "$GPU_FILE" ]; then
-          echo "ERROR: GPU frequency file not found at $GPU_FILE"
-          find . -name "mtk_gpufreq_core.c" -type f
-          exit 1
-        fi
-        
-        cp "$GPU_FILE" "${GPU_FILE}.backup"
-        
-        python3 << 'PYEOF'
-        path = "drivers/misc/mediatek/base/power/mt6771/mtk_gpufreq_core.c"
-        
-        with open(path, "r") as f:
-            content = f.read()
-        
-        old = "if (g_efuse_speed_bound_id == 0x03000000)"
-        
+        old = "unsigned int _mt_cpufreq_get_cpu_level(void)\n{\n\tunsigned int lv = CPU_LEVEL_0;\n\tunsigned int temp = 0;\n\tunsigned int segcode = 0;\n\tunsigned int bincode = 0;\n\tunsigned int turbocode = 0;\n\tunsigned int a_code = 0;"
+        new = "unsigned int _mt_cpufreq_get_cpu_level(void)\n{\n\tturbo_flag = 0;\n\treturn CPU_LEVEL_0;\n\tunsigned int lv = CPU_LEVEL_0;\n\tunsigned int temp = 0;\n\tunsigned int segcode = 0;\n\tunsigned int bincode = 0;\n\tunsigned int turbocode = 0;\n\tunsigned int a_code = 0;"
         if old in content:
-            idx = content.find(old)
-            segment_start = content.rfind("\tif (g_efuse_speed_bound_id", 0, idx+100)
-            if segment_start < 0:
-                segment_start = idx
-            
-            search_start = idx
-            brace_count = 0
-            block_end = search_start
-            
-            for i in range(search_start, min(search_start + 2000, len(content))):
-                if content[i] == '{':
-                    brace_count += 1
-                elif content[i] == '}':
-                    brace_count -= 1
-                    if brace_count == 0:
-                        block_end = i + 1
-                        break
-            
-            if block_end > search_start:
-                old_block = content[segment_start:block_end]
-                new_block = "\t/* OC: Force Segment 1 = 900MHz GPU */\n\tg_segment_id = MT6771_SEGMENT_1;\n"
-                
-                content = content.replace(old_block, new_block)
-                print("SUCCESS: GPU segment patch applied")
-                print(f"Replaced {len(old_block)} chars with force assignment")
-            else:
-                print("WARNING: Could not find end of segment block")
-                override = "\t/* OC: Force Segment 1 = 900MHz GPU */\n\tg_segment_id = MT6771_SEGMENT_1;\n\treturn;\n\n"
-                content = content[:segment_start] + override + content[segment_start:]
-                print("Inserted override before segment detection")
+            content = content.replace(old, new)
+            print("CPU patch OK")
         else:
-            print("WARNING: Expected GPU segment pattern not found")
-            if "MT6771_SEGMENT" in content:
-                for i, line in enumerate(content.split('\n')):
-                    if 'MT6771_SEGMENT' in line:
-                        print(f"  Line {i+1}: {line.strip()}")
-        
+            print("CPU patch string NOT found - check tabs vs spaces")
         with open(path, "w") as f:
             f.write(content)
-        PYEOF
-        
-        echo "GPU patch completed"
-        grep -B1 -A3 "OC:" "$GPU_FILE" || echo "Patch verification line not found"
 
-    - name: Create Kernel Config
+    - name: Patch GPU Segment
+      shell: python3 {0}
       run: |
-        if [ ! -f kernel_config.txt ]; then
-          echo "Creating default kernel config for MT6771..."
-          cat > kernel_config.txt << 'EOF'
-        CONFIG_ARM64=y
-        CONFIG_ARCH_MEDIATEK=y
-        CONFIG_MACH_MT6771=y
-        CONFIG_CPU_FREQ=y
-        CONFIG_CPU_FREQ_STAT=y
-        CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE=y
-        CONFIG_CPU_FREQ_GOV_PERFORMANCE=y
-        CONFIG_CPU_FREQ_GOV_POWERSAVE=y
-        CONFIG_CPU_FREQ_GOV_USERSPACE=y
-        CONFIG_CPU_FREQ_GOV_ONDEMAND=y
-        CONFIG_CPU_FREQ_GOV_INTERACTIVE=y
-        CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y
-        CONFIG_MTK_CPU_FREQ=y
-        CONFIG_MTK_GPU_FREQ=y
-        CONFIG_MTK_GPU_OVERSHOOT=y
-        CONFIG_MTK_GPU_SUPPORT=y
-        CONFIG_THERMAL=y
-        CONFIG_MTK_THERMAL=y
-        CONFIG_CPU_THERMAL=y
-        CONFIG_IKCONFIG=y
-        CONFIG_IKCONFIG_PROC=y
-        EOF
-        fi
-        
-        cp kernel_config.txt kernel-source/arch/arm64/configs/walton_defconfig
-        echo "Kernel config copied to walton_defconfig"
+        path = "kernel-source/drivers/misc/mediatek/base/power/mt6771/mtk_gpufreq_core.c"
+        with open(path, "r") as f:
+            content = f.read()
+        old = "\tif (g_efuse_speed_bound_id == 0x03000000) {\n\t\t/* 900MHz Version */\n\t\tg_segment_id = MT6771_SEGMENT_1;\n\t} else if (g_efuse_speed_bound_id == 0x05000000) {\n\t\t/* 800MHz Version */\n\t\tg_segment_id = MT6771_SEGMENT_2;\n\t} else if (g_efuse_speed_bound_id == 0x07000000) {\n\t\t/* 700MHz Version */\n\t\tg_segment_id = MT6771_SEGMENT_3;\n\t} else if (g_efuse_speed_bound_id == 0x02000000 && g_efuse_turbo_id == 0x00000008) {\n\t\t/* 900MHz Version */\n\t\tg_segment_id = MT6771_SEGMENT_4;\n\t} else {\n\t\t/* Other Version, set default segment */\n\t\tg_segment_id = MT6771_SEGMENT_2;\n\t}"
+        new = "\t/* OC patch: force Segment 1 = 900MHz GPU */\n\tg_segment_id = MT6771_SEGMENT_1;"
+        if old in content:
+            content = content.replace(old, new)
+            print("GPU patch OK")
+        else:
+            print("GPU patch string NOT found")
+        with open(path, "w") as f:
+            f.write(content)
 
-    - name: Configure and Build Kernel
-      shell: bash
+    - name: Copy Kernel Config
+      run: |
+        cp kernel_config.txt \
+          kernel-source/arch/arm64/configs/walton_defconfig
+
+    - name: Configure Kernel
       run: |
         cd kernel-source
-        
-        export ARCH=arm64
-        export CROSS_COMPILE=aarch64-linux-gnu-
-        export CC=clang-6.0
-        export CLANG_TRIPLE=aarch64-linux-gnu-
-        
-        echo "========================================="
-        echo "Configuring kernel..."
-        echo "Compiler: $(clang-6.0 --version | head -1)"
-        echo "========================================="
-        
-        make walton_defconfig
-        
-        echo ""
-        echo "Configuration complete"
-        grep -E "CPU_FREQ|GPU_FREQ|MT6771" .config | head -20 || true
-        
-        echo ""
-        echo "========================================="
-        echo "Building kernel..."
-        echo "========================================="
-        
+        make ARCH=arm64 \
+             CROSS_COMPILE=aarch64-linux-gnu- \
+             CC=clang-6.0 \
+             CLANG_TRIPLE=aarch64-linux-gnu- \
+             walton_defconfig
+
+    - name: Build Kernel
+      run: |
+        cd kernel-source
         set -o pipefail
-        make -j$(nproc) HOSTCFLAGS="-fcommon" Image.gz 2>&1 | tee build.log
-        BUILD_EXIT=$?
-        
-        echo ""
-        echo "Build exit code: $BUILD_EXIT"
-        
+        make ARCH=arm64 \
+             CROSS_COMPILE=aarch64-linux-gnu- \
+             CC=clang-6.0 \
+             CLANG_TRIPLE=aarch64-linux-gnu- \
+             HOSTCFLAGS="-fcommon" \
+             -j$(nproc) Image.gz 2>&1 | tee build.log
+        BUILD_RESULT=${PIPESTATUS[0]}
+        echo "Exit code: $BUILD_RESULT"
         if [ -f arch/arm64/boot/Image.gz ]; then
-          echo ""
-          echo "========================================="
-          echo "  BUILD SUCCESSFUL!"
-          echo "========================================="
+          echo "SUCCESS"
           ls -lh arch/arm64/boot/Image.gz
-          echo ""
-          strings arch/arm64/boot/Image.gz | grep "Linux version" || true
         else
-          echo ""
-          echo "========================================="
-          echo "  BUILD FAILED"
-          echo "========================================="
-          echo ""
-          echo "=== Errors ==="
-          grep -i "error:" build.log | head -30
-          echo ""
-          echo "=== Last 30 lines ==="
-          tail -30 build.log
+          echo "FAILED"
+          grep "error:" build.log | grep -v "warning:" | tail -20
           exit 1
         fi
 
-    - name: Upload Kernel Image
-      uses: actions/upload-artifact@v4
-      if: success()
-      with:
-        name: kernel-oc-Image.gz
-        path: kernel-source/arch/arm64/boot/Image.gz
-        retention-days: 30
-
-    - name: Upload Build Log
+    - name: Upload Kernel
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: build-log
-        path: kernel-source/build.log
-        retention-days: 7
-
-    - name: Upload Config
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: kernel-config
-        path: kernel-source/.config
-        retention-days: 7
-
-    - name: Upload Patched Sources
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: patched-sources
+        name: kernel-oc
         path: |
-          kernel-source/drivers/misc/mediatek/base/power/cpufreq_v1/src/mach/mt6771/mtk_cpufreq_platform.c
-          kernel-source/drivers/misc/mediatek/base/power/mt6771/mtk_gpufreq_core.c
-        retention-days: 7
+          kernel-source/arch/arm64/boot/Image.gz
+          kernel-source/build.log
