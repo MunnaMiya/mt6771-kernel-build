@@ -76,7 +76,7 @@ jobs:
         sed -i 's/-fno-common/-fcommon/g' Makefile 2>/dev/null || true
         sed -i 's/-fno-common/-fcommon/g' arch/arm64/Makefile 2>/dev/null || true
         
-        # Fix missing 'desc' variable in kernel/irq/irqdesc.c with a Python script
+        # Fix missing 'irq' and 'desc' variables in kernel/irq/irqdesc.c
         python3 << 'PYEOF'
         import re
         
@@ -84,22 +84,31 @@ jobs:
         with open(filepath, "r") as f:
             content = f.read()
         
-        # Find the __handle_domain_irq function and insert the declaration
-        # after the opening brace, before any code that uses 'desc'.
+        # Find the __handle_domain_irq function and opening brace
         func_pattern = r'(int __handle_domain_irq\([^)]*\)\s*\{)'
         match = re.search(func_pattern, content)
-        if match:
-            # Insert after the opening brace
-            insert_point = match.end()
-            # Insert a newline and the declaration
-            declaration = "\n\tstruct irq_desc *desc = irq_to_desc(irq);\n"
-            content = content[:insert_point] + declaration + content[insert_point:]
-            with open(filepath, "w") as f:
-                f.write(content)
-            print("Inserted missing 'desc' declaration in __handle_domain_irq")
-        else:
+        if not match:
             print("ERROR: Could not find __handle_domain_irq function in irqdesc.c")
             exit(1)
+        
+        insert_point = match.end()
+        # Grab a snippet of the function body to check existing declarations
+        snippet = content[insert_point:insert_point+300]
+        
+        declarations = ""
+        if 'unsigned int irq' not in snippet and 'int irq' not in snippet:
+            declarations += "\n\tunsigned int irq = irq_find_mapping(domain, hwirq);"
+        if 'struct irq_desc *desc' not in snippet:
+            declarations += "\n\tstruct irq_desc *desc = irq_to_desc(irq);"
+        
+        if declarations:
+            content = content[:insert_point] + declarations + content[insert_point:]
+            with open(filepath, "w") as f:
+                f.write(content)
+            print("Inserted missing variable declarations in __handle_domain_irq:")
+            print(declarations.strip())
+        else:
+            print("Both 'irq' and 'desc' already declared, no change needed.")
         PYEOF
         
         echo "Build fixes applied successfully"
