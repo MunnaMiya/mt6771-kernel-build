@@ -11,28 +11,31 @@ jobs:
       image: ubuntu:18.04
 
     steps:
-    - name: Install Git First
-      run: |
-        apt-get update
-        apt-get install -y git ca-certificates
-
-    - name: Checkout Repo
-      uses: actions/checkout@v4
-
     - name: Install Dependencies
       run: |
-        apt-get install -y wget curl bc bison flex \
+        apt-get update
+        apt-get install -y git wget curl bc bison flex \
           build-essential libssl-dev libelf-dev \
           libncurses5-dev python3 python \
           gcc-aarch64-linux-gnu \
           binutils-aarch64-linux-gnu \
-          cpio rsync gnupg \
+          cpio rsync ca-certificates gnupg \
           clang-6.0 llvm-6.0 lld-6.0
 
     - name: Setup Clang 6
       run: |
         update-alternatives --install /usr/bin/clang clang /usr/bin/clang-6.0 100
         clang --version
+
+    - name: Get kernel_config from repo
+      run: |
+        git clone --depth=1 \
+          https://github.com/${{ github.repository }}.git \
+          myrepo
+        ls myrepo/
+        cp myrepo/kernel_config.txt ./kernel_config.txt
+        echo "kernel_config.txt ready"
+        wc -l kernel_config.txt
 
     - name: Clone Nokia MT6771 Kernel
       run: |
@@ -85,10 +88,10 @@ jobs:
 
     - name: Copy Kernel Config
       run: |
-        ls -la kernel_config.txt
         cp kernel_config.txt \
           kernel-source/arch/arm64/configs/walton_defconfig
         echo "Config copied"
+        wc -l kernel-source/arch/arm64/configs/walton_defconfig
 
     - name: Configure Kernel
       run: |
