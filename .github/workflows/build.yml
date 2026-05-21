@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
 
     steps:
 
@@ -20,24 +20,31 @@ jobs:
         sudo apt update
 
         sudo apt install -y \
-          git wget curl unzip bc \
-          libssl-dev libelf-dev \
-          bison flex \
+          git \
+          wget \
+          curl \
+          unzip \
+          bc \
+          flex \
+          bison \
+          build-essential \
           gcc-aarch64-linux-gnu \
           g++-aarch64-linux-gnu \
           binutils-aarch64-linux-gnu \
-          build-essential \
+          libssl-dev \
+          libelf-dev \
           libncurses-dev \
           python3 \
-          cpio rsync \
+          cpio \
+          rsync \
           file
 
-    - name: Get Clang 6.0
+    - name: Download Clang 6.0
       run: |
         cd $HOME
 
         wget -q \
-          https://releases.llvm.org/6.0.0/clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04.tar.xz
+        https://releases.llvm.org/6.0.0/clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04.tar.xz
 
         tar -xf clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04.tar.xz
 
@@ -45,18 +52,18 @@ jobs:
 
         $HOME/clang-6.0/bin/clang --version
 
-    - name: Clone Nokia MT6771 Kernel
+    - name: Clone Nokia MT6771 Kernel Source
       run: |
         git clone --depth=1 \
-          https://github.com/nokia-dev/android_kernel_nokia_mt6771.git \
-          kernel-source
+        https://github.com/nokia-dev/android_kernel_nokia_mt6771.git \
+        kernel-source
 
-    - name: Fix old kernel compatibility
+    - name: Fix Old Kernel Toolchain Issues
       run: |
         sed -i 's/extern YYLTYPE yylloc;/YYLTYPE yylloc;/g' \
         kernel-source/scripts/dtc/dtc-lexer.l || true
 
-    - name: Patch CPU OPP
+    - name: Apply CPU Patch
       shell: python3 {0}
       run: |
         path = "kernel-source/drivers/misc/mediatek/base/power/cpufreq_v1/src/mach/mt6771/mtk_cpufreq_platform.c"
@@ -70,14 +77,14 @@ jobs:
 
         if old in content:
             content = content.replace(old, new)
-            print("CPU patch applied OK")
+            print("CPU patch applied successfully")
         else:
             print("CPU patch string NOT found")
 
         with open(path, "w") as f:
             f.write(content)
 
-    - name: Patch GPU Segment
+    - name: Apply GPU Patch
       shell: python3 {0}
       run: |
         path = "kernel-source/drivers/misc/mediatek/base/power/mt6771/mtk_gpufreq_core.c"
@@ -91,7 +98,7 @@ jobs:
 
         if old in content:
             content = content.replace(old, new)
-            print("GPU patch applied OK")
+            print("GPU patch applied successfully")
         else:
             print("GPU patch string NOT found")
 
@@ -101,10 +108,10 @@ jobs:
     - name: Copy Kernel Config
       run: |
         cp kernel_config.txt \
-          kernel-source/arch/arm64/configs/walton_defconfig
+        kernel-source/arch/arm64/configs/walton_defconfig
 
         wc -l \
-          kernel-source/arch/arm64/configs/walton_defconfig
+        kernel-source/arch/arm64/configs/walton_defconfig
 
     - name: Configure Kernel
       run: |
@@ -133,7 +140,7 @@ jobs:
           LLVM_IAS=0 \
           HOSTCFLAGS="-fcommon" \
           -j4 \
-          Image.gz-dtb 2>&1 | tee build.log
+          Image.gz 2>&1 | tee build.log
 
         echo "=============================="
         echo "BOOT OUTPUT FILES"
@@ -142,12 +149,12 @@ jobs:
         find arch/arm64/boot/ -type f
 
         echo "=============================="
-        echo "CHECK IMAGE"
+        echo "CHECK KERNEL"
         echo "=============================="
 
-        ls -lh arch/arm64/boot/Image.gz-dtb || true
+        ls -lh arch/arm64/boot/Image.gz || true
 
-    - name: Upload Kernel
+    - name: Upload Artifact
       uses: actions/upload-artifact@v4
       if: always()
 
@@ -155,5 +162,5 @@ jobs:
         name: kernel-oc
 
         path: |
-          kernel-source/arch/arm64/boot/Image.gz-dtb
+          kernel-source/arch/arm64/boot/Image.gz
           kernel-source/build.log
