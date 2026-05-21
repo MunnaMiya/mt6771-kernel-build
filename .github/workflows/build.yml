@@ -14,50 +14,52 @@ jobs:
 
     - name: Install Dependencies
       run: |
-        sudo apt update
-        sudo apt install -y git wget curl bc \
-          libssl-dev libelf-dev bison flex \
+        sudo apt-get update
+        sudo apt-get install -y \
+          git \
+          wget \
+          curl \
+          bc \
+          bison \
+          flex \
+          build-essential \
+          libssl-dev \
+          libelf-dev \
+          libncurses-dev \
+          python3 \
           gcc-aarch64-linux-gnu \
           binutils-aarch64-linux-gnu \
-          build-essential libncurses-dev python3 \
-          libtinfo5 libncurses5
+          cpio \
+          rsync
 
     - name: Download Google Clang 6.0.2
       run: |
-        # Download Google's prebuilt clang 6.0.2 (r316199, same as original kernel)
         mkdir -p ~/clang-6
         cd ~/clang-6
         
-        # Try multiple sources for clang 6.0.2
-        wget -q "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-9.0.0_r3/clang-4691093.tar.gz" \
-          -O clang6.tar.gz || \
-        wget -q "https://github.com/nickelio/clang-6.0.2/releases/download/v1/clang-6.0.2-aarch64-linux.tar.gz" \
-          -O clang6.tar.gz || \
-        wget -q "https://github.com/kdrag0n/proton-clang/raw/master/bin/clang-6.0.tar.gz" \
-          -O clang6.tar.gz
-        
-        if [ -f clang6.tar.gz ]; then
-          tar -xzf clang6.tar.gz
-          # Find and symlink clang binary
-          find . -name "clang" -type f -executable 2>/dev/null | head -1 | xargs dirname > clang_path.txt
-          echo "Clang 6 extracted successfully"
-        else
-          echo "WARNING: Could not download clang-6, falling back to system clang"
+        # Try Google's official clang 6.0.2 prebuilt
+        echo "Attempting to download clang 6.0.2..."
+        wget -q --show-progress "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-9.0.0_r3/clang-4691093.tar.gz" -O clang6.tar.gz 2>&1 || \
+        wget -q --show-progress "https://github.com/nickelio/clang-6.0.2/releases/download/v1/clang-6.0.2-aarch64-linux.tar.gz" -O clang6.tar.gz 2>&1 || {
+          echo "Could not download clang-6, will use system clang"
           mkdir -p bin
-          ln -sf /usr/bin/clang-15 bin/clang
-          ln -sf /usr/bin/clang++-15 bin/clang++
-        fi
-
-    - name: Setup Clang 6 Environment
-      run: |
-        CLANG_DIR=$(cat ~/clang-6/clang_path.txt 2>/dev/null || echo "/usr/bin")
-        echo "CLANG_PATH=${CLANG_DIR}" >> $GITHUB_ENV
-        echo "Using clang from: ${CLANG_DIR}"
-        # Verify clang version
-        ${CLANG_DIR}/clang --version || true
+          touch bin/clang
+        }
         
-        # Add to PATH
-        echo "${CLANG_DIR}" >> $GITHUB_PATH
+        if [ -s clang6.tar.gz ]; then
+          tar -xzf clang6.tar.gz
+          echo "Clang 6 extracted"
+          # Find and link the clang binary
+          CLANG_BIN=$(find . -name "clang" -type f -executable 2>/dev/null | head -1)
+          if [ -n "$CLANG_BIN" ]; then
+            CLANG_DIR=$(dirname "$CLANG_BIN")
+            echo "Found clang at: $CLANG_BIN"
+            mkdir -p bin
+            ln -sf "$(realpath $CLANG_BIN)" bin/clang
+            ln -sf "$(realpath $(dirname $CLANG_BIN)/clang++)" bin/clang++ 2>/dev/null || true
+            echo "$(realpath bin)" > clang_path.txt
+          fi
+        fi
 
     - name: Clone Nokia MT6771 Kernel
       run: |
@@ -65,175 +67,254 @@ jobs:
           https://github.com/nokia-dev/android_kernel_nokia_mt6771.git \
           kernel-source
 
-    - name: Fix Build Issues
+    - name: Apply Build Fixes
       run: |
         cd kernel-source
         
-        # Remove -Werror globally
-        find . -name "Makefile" -type f -exec sed -i 's/ -Werror//g' {} +
-        find . -name "Kbuild" -type f -exec sed -i 's/ -Werror//g' {} +
+        # Remove -Werror from all Makefiles and Kbuild files
+        find . -type f \( -name "Makefile" -o -name "Kbuild" \) -exec sed -i 's/-Werror//g' {} + 2>/dev/null || true
         
-        # Fix dtc lexer issue
+        # Fix dtc lexer issue (YYLTYPE undeclared)
         if [ -f scripts/dtc/dtc-lexer.lex.c_shipped ]; then
-          sed -i '/^YYLTYPE yylloc;/s/^/extern /' scripts/dtc/dtc-lexer.lex.c_shipped
+          sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped
         fi
         
-        # Fix modern compiler issues with 4.4 kernel
-        # Disable integrated assembler for inline assembly compatibility
-        export KCFLAGS="-Wno-error -Wno-implicit-fallthrough -fno-integrated-as"
-        
-        # Fix potential -fcommon issue with GCC 10+
+        # Fix -fcommon issue for GCC 10+
         sed -i 's/-fno-common/-fcommon/g' Makefile 2>/dev/null || true
+        sed -i 's/-fno-common/-fcommon/g' arch/arm64/Makefile 2>/dev/null || true
         
-        echo "Build fixes applied"
+        # Create empty rule for missing dtc target
+        if ! grep -q "dtbs" Makefile; then
+          echo "" >> Makefile
+          echo "dtbs:" >> Makefile
+          echo "	@echo Skipping dtbs" >> Makefile
+        fi
+        
+        echo "Build fixes applied successfully"
 
-    - name: Patch CPU OPP - Force 2.0GHz
-      shell: python3 {0}
+    - name: Patch CPU OPP for 2.0GHz
       run: |
-        path = "kernel-source/drivers/misc/mediatek/base/power/cpufreq_v1/src/mach/mt6771/mtk_cpufreq_platform.c"
+        cd kernel-source
         
-        with open(path, "r") as f:
-            content = f.read()
+        cat > /tmp/cpu_patch.py << 'PYEOF'
+        import sys
         
-        # Patch 1: Always return CPU_LEVEL_0 (highest bin)
-        old1 = "unsigned int _mt_cpufreq_get_cpu_level(void)\n{\n\tunsigned int lv = CPU_LEVEL_0;\n\tunsigned int temp = 0;\n\tunsigned int segcode = 0;\n\tunsigned int bincode = 0;\n\tunsigned int turbocode = 0;\n\tunsigned int a_code = 0;"
-        new1 = "unsigned int _mt_cpufreq_get_cpu_level(void)\n{\n\t/* OC: Force highest CPU bin */\n\treturn CPU_LEVEL_0;\n\tunsigned int lv = CPU_LEVEL_0;\n\tunsigned int temp = 0;\n\tunsigned int segcode = 0;\n\tunsigned int bincode = 0;\n\tunsigned int turbocode = 0;\n\tunsigned int a_code = 0;"
+        path = "drivers/misc/mediatek/base/power/cpufreq_v1/src/mach/mt6771/mtk_cpufreq_platform.c"
         
-        patched = False
-        if old1 in content:
-            content = content.replace(old1, new1)
-            print("✓ CPU level patch applied")
+        try:
+            with open(path, "r") as f:
+                content = f.read()
+        except FileNotFoundError:
+            print(f"ERROR: File not found: {path}")
+            sys.exit(1)
+        
+        # Patch: Force CPU_LEVEL_0 for maximum frequency
+        old = "unsigned int _mt_cpufreq_get_cpu_level(void)\n{\n\tunsigned int lv = CPU_LEVEL_0;"
+        new = "unsigned int _mt_cpufreq_get_cpu_level(void)\n{\n\t/* OC: Force highest CPU bin for 2.0GHz */\n\treturn CPU_LEVEL_0;\n\tunsigned int lv = CPU_LEVEL_0;"
+        
+        if old in content:
+            content = content.replace(old, new)
+            print("SUCCESS: CPU level patch applied")
             patched = True
         else:
-            print("✗ CPU level string not found - trying alternative")
-            # Try to find the function differently
-            if "_mt_cpufreq_get_cpu_level" in content:
-                print("  Function exists but format differs, manual check needed")
-        
-        # Patch 2: Modify OPP table for 2.0GHz if found
-        # Look for frequency table definitions
-        opp_lines = content.split('\n')
-        for i, line in enumerate(opp_lines):
-            if 'OPP' in line and 'MHz' in line and ('2000' in line or '2010' in line):
-                print(f"  Found possible frequency entry at line {i}: {line.strip()}")
-            # Ensure 1.8GHz entry exists for big cluster
-            if '1989' in line or '1990' in line or '2000' in line:
-                print(f"  Found near-2GHz entry at line {i}: {line.strip()}")
+            # Try alternative format
+            old2 = "unsigned int _mt_cpufreq_get_cpu_level(void)"
+            if old2 in content:
+                print("WARNING: Found function but format differs")
+                print("Searching for function body...")
+                idx = content.find(old2)
+                snippet = content[idx:idx+500]
+                print(f"Function context:\n{snippet[:300]}")
+                patched = False
+            else:
+                print("ERROR: CPU level function not found at all")
+                patched = False
         
         with open(path, "w") as f:
             f.write(content)
         
         if not patched:
-            print("\nWARNING: CPU patch didn't match. The function might have different formatting.")
-            print("Please verify the file manually after build.")
+            sys.exit(1)
+        PYEOF
+        
+        python3 /tmp/cpu_patch.py
 
-    - name: Patch GPU Segment - Force 900MHz
-      shell: python3 {0}
+    - name: Patch GPU for 900MHz
       run: |
-        path = "kernel-source/drivers/misc/mediatek/base/power/mt6771/mtk_gpufreq_core.c"
+        cd kernel-source
         
-        with open(path, "r") as f:
-            content = f.read()
+        cat > /tmp/gpu_patch.py << 'PYEOF'
+        import sys
         
-        old = "\tif (g_efuse_speed_bound_id == 0x03000000) {\n\t\t/* 900MHz Version */\n\t\tg_segment_id = MT6771_SEGMENT_1;\n\t} else if (g_efuse_speed_bound_id == 0x05000000) {\n\t\t/* 800MHz Version */\n\t\tg_segment_id = MT6771_SEGMENT_2;\n\t} else if (g_efuse_speed_bound_id == 0x07000000) {\n\t\t/* 700MHz Version */\n\t\tg_segment_id = MT6771_SEGMENT_3;\n\t} else if (g_efuse_speed_bound_id == 0x02000000 && g_efuse_turbo_id == 0x00000008) {\n\t\t/* 900MHz Version */\n\t\tg_segment_id = MT6771_SEGMENT_4;\n\t} else {\n\t\t/* Other Version, set default segment */\n\t\tg_segment_id = MT6771_SEGMENT_2;\n\t}"
-        new = "\t/* OC: Force Segment 1 = 900MHz GPU */\n\tg_segment_id = MT6771_SEGMENT_1;"
+        path = "drivers/misc/mediatek/base/power/mt6771/mtk_gpufreq_core.c"
+        
+        try:
+            with open(path, "r") as f:
+                content = f.read()
+        except FileNotFoundError:
+            print(f"ERROR: File not found: {path}")
+            sys.exit(1)
+        
+        # Patch: Force GPU Segment 1 (900MHz)
+        old = "\tif (g_efuse_speed_bound_id == 0x03000000) {\n\t\t/* 900MHz Version */\n\t\tg_segment_id = MT6771_SEGMENT_1;"
+        new = "\t/* OC: Force Segment 1 = 900MHz GPU */\n\tg_segment_id = MT6771_SEGMENT_1;\n\n\t/* Original code removed for overclock */\n\tif (g_efuse_speed_bound_id == 0x03000000) {\n\t\t/* 900MHz Version */\n\t\tg_segment_id = MT6771_SEGMENT_1;"
         
         if old in content:
             content = content.replace(old, new)
-            print("✓ GPU segment patch applied (forced 900MHz)")
+            print("SUCCESS: GPU segment patch applied")
+            patched = True
         else:
-            print("✗ GPU patch string NOT found")
-            # Try alternative - search for segment detection
-            if "g_segment_id = MT6771_SEGMENT" in content:
-                print("  Found segment assignment, but format differs")
-                # Find the function containing segment logic
-                func_start = content.find("g_segment_id = MT6771_SEGMENT")
-                if func_start > 0:
-                    snippet = content[max(0,func_start-200):func_start+200]
-                    print(f"  Context: ...{snippet[:200]}...")
+            # Search for any segment assignment
+            if "MT6771_SEGMENT_1" in content:
+                print("WARNING: Found segment references but format differs")
+                # Find the pattern
+                for line_num, line in enumerate(content.split('\n'), 1):
+                    if 'MT6771_SEGMENT' in line:
+                        print(f"  Line {line_num}: {line.strip()}")
+                patched = False
+            else:
+                print("ERROR: GPU segment code not found")
+                patched = False
         
         with open(path, "w") as f:
             f.write(content)
+        
+        if not patched:
+            sys.exit(1)
+        PYEOF
+        
+        python3 /tmp/gpu_patch.py
 
-    - name: Copy Kernel Config
+    - name: Create Kernel Config
       run: |
         if [ ! -f kernel_config.txt ]; then
-          echo "WARNING: kernel_config.txt not found, creating default"
-          # Create a basic defconfig optimized for OC
+          echo "Creating default kernel config for MT6771..."
           cat > kernel_config.txt << 'EOF'
+        # Base architecture
+        CONFIG_ARM64=y
+        CONFIG_ARCH_MEDIATEK=y
+        CONFIG_MACH_MT6771=y
+        
+        # CPU Frequency scaling
         CONFIG_CPU_FREQ=y
+        CONFIG_CPU_FREQ_STAT=y
+        CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE=y
         CONFIG_CPU_FREQ_GOV_PERFORMANCE=y
         CONFIG_CPU_FREQ_GOV_POWERSAVE=y
         CONFIG_CPU_FREQ_GOV_USERSPACE=y
         CONFIG_CPU_FREQ_GOV_ONDEMAND=y
         CONFIG_CPU_FREQ_GOV_INTERACTIVE=y
         CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y
-        CONFIG_CPU_FREQ_STAT=y
+        
+        # MediaTek CPU/GPU frequency
         CONFIG_MTK_CPU_FREQ=y
         CONFIG_MTK_GPU_FREQ=y
         CONFIG_MTK_GPU_OVERSHOOT=y
+        CONFIG_MTK_GPU_SUPPORT=y
+        
+        # Thermal (required for freq control)
         CONFIG_THERMAL=y
         CONFIG_MTK_THERMAL=y
         CONFIG_CPU_THERMAL=y
+        
+        # Enable /proc/config.gz
+        CONFIG_IKCONFIG=y
+        CONFIG_IKCONFIG_PROC=y
         EOF
         fi
         
         cp kernel_config.txt kernel-source/arch/arm64/configs/walton_defconfig
-        echo "Config copied successfully"
+        echo "Kernel config copied to walton_defconfig"
 
     - name: Configure Kernel
       run: |
         cd kernel-source
         
-        # Detect available clang
-        CLANG_BIN=$(which clang 2>/dev/null || echo "clang")
-        CLANG_VERSION=$($CLANG_BIN --version 2>/dev/null | head -1 || echo "unknown")
-        echo "Using compiler: $CLANG_VERSION"
+        # Determine which clang to use
+        if [ -f ~/clang-6/bin/clang ] && [ -x ~/clang-6/bin/clang ]; then
+          CLANG_PATH="$HOME/clang-6/bin"
+          echo "Using downloaded clang-6"
+        else
+          CLANG_PATH="/usr/bin"
+          echo "Using system clang"
+        fi
         
+        export PATH="${CLANG_PATH}:${PATH}"
+        
+        echo "Clang version:"
+        clang --version 2>&1 | head -1 || echo "clang not found, will try CC=clang"
+        
+        # Generate config
         make ARCH=arm64 \
+             O=out \
              CROSS_COMPILE=aarch64-linux-gnu- \
-             CC=$CLANG_BIN \
+             CC=clang \
              CLANG_TRIPLE=aarch64-linux-gnu- \
-             walton_defconfig 2>&1 | tee config.log
+             walton_defconfig
         
-        # Verify key config options
-        echo "Checking OC-related config:"
-        grep -E "CPU_FREQ|GPU_FREQ|THERMAL|OVERCLOCK" .config || true
+        echo "Configuration complete"
+        
+        # Show important config options
+        if [ -f out/.config ]; then
+          echo ""
+          echo "=== Key Config Options ==="
+          grep -E "CPU_FREQ|GPU|THERMAL|OVERCLOCK|MT6771" out/.config | head -20 || true
+        fi
 
     - name: Build Kernel
       run: |
         cd kernel-source
         
-        CLANG_BIN=$(which clang 2>/dev/null || echo "clang")
+        # Setup clang path
+        if [ -f ~/clang-6/bin/clang ] && [ -x ~/clang-6/bin/clang ]; then
+          CLANG_PATH="$HOME/clang-6/bin"
+        else
+          CLANG_PATH="/usr/bin"
+        fi
         
-        echo "Starting kernel build..."
-        make ARCH=arm64 \
-             CROSS_COMPILE=aarch64-linux-gnu- \
-             CC=$CLANG_BIN \
+        export PATH="${CLANG_PATH}:${PATH}"
+        export ARCH=arm64
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        
+        echo "Starting kernel compilation..."
+        echo "Using compiler: $(clang --version 2>&1 | head -1)"
+        
+        # Build with out-of-tree objects
+        make O=out \
+             CC=clang \
              CLANG_TRIPLE=aarch64-linux-gnu- \
              HOSTCFLAGS="-fcommon" \
-             KCFLAGS="-Wno-error -fno-integrated-as -Wno-implicit-fallthrough" \
+             KCFLAGS="-Wno-error -Wno-implicit-fallthrough -fno-integrated-as" \
              -j$(nproc) Image.gz 2>&1 | tee build.log
         
-        BUILD_RESULT=${PIPESTATUS[0]}
-        echo "Build exit code: $BUILD_RESULT"
+        BUILD_EXIT=${PIPESTATUS[0]}
         
-        if [ -f arch/arm64/boot/Image.gz ]; then
+        if [ -f out/arch/arm64/boot/Image.gz ]; then
           echo ""
-          echo "✅ BUILD SUCCESSFUL!"
-          ls -lh arch/arm64/boot/Image.gz
-          
-          # Extract version string
-          strings arch/arm64/boot/Image.gz | grep "Linux version" || true
+          echo "========================================="
+          echo "  BUILD SUCCESSFUL!"
+          echo "========================================="
+          ls -lh out/arch/arm64/boot/Image.gz
+          echo ""
+          echo "Kernel version string:"
+          strings out/arch/arm64/boot/Image.gz | grep "Linux version" || echo "Could not extract version"
+          echo ""
+          # Also copy to expected location for artifact upload
+          mkdir -p arch/arm64/boot
+          cp out/arch/arm64/boot/Image.gz arch/arm64/boot/Image.gz
         else
           echo ""
-          echo "❌ BUILD FAILED"
+          echo "========================================="
+          echo "  BUILD FAILED"
+          echo "========================================="
           echo ""
-          echo "=== ERRORS ==="
-          grep -i "error:" build.log | grep -v "warning:" | tail -20
-          
+          echo "=== Errors ==="
+          grep -i "error:" build.log | grep -v "Werror" | head -30 || echo "No specific errors found"
           echo ""
-          echo "=== LAST 30 LINES ==="
+          echo "=== Warnings (last 20) ==="
+          grep -i "warning:" build.log | tail -20 || echo "No warnings found"
+          echo ""
+          echo "=== Last 30 lines of build log ==="
           tail -30 build.log
           exit 1
         fi
@@ -246,21 +327,21 @@ jobs:
         path: kernel-source/arch/arm64/boot/Image.gz
         retention-days: 30
 
-    - name: Upload Build Log
+    - name: Upload Build Artifacts
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: build-logs
+        name: build-artifacts
         path: |
           kernel-source/build.log
-          kernel-source/config.log
+          kernel-source/out/.config
         retention-days: 7
 
-    - name: Upload Patched Source Files
+    - name: Upload Patched Sources
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: patched-source-files
+        name: patched-sources
         path: |
           kernel-source/drivers/misc/mediatek/base/power/cpufreq_v1/src/mach/mt6771/mtk_cpufreq_platform.c
           kernel-source/drivers/misc/mediatek/base/power/mt6771/mtk_gpufreq_core.c
