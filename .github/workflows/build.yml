@@ -14,8 +14,10 @@ jobs:
 
     - name: Install Dependencies
       run: |
+        # ল্যাটেস্ট উবুন্টুতে libncurses5 ও libtinfo5 প্যাকেজ পাওয়ার জন্য ওল্ড রিপোজিটরি অ্যাড করা
+        sudo add-apt-repository -y "deb http://cz.archive.ubuntu.com/ubuntu focal main universe"
         sudo apt update
-        # ল্যাটেস্ট উবুন্টুতে ওল্ড টুলচেন রান করার জন্য libncurses5 ও libtinfo5 প্রয়োজন
+        
         sudo apt install -y git wget curl bc \
           libssl-dev libelf-dev bison flex \
           build-essential libncurses-dev python3 \
@@ -26,7 +28,7 @@ jobs:
         mkdir -p $GITHUB_WORKSPACE/toolchains
         cd $GITHUB_WORKSPACE/toolchains
         
-        # Download AOSP Clang 10.0.4 (MTK 4.4 কার্নেলের জন্য পারфেক্ট)
+        # Download AOSP Clang 10.0.4 (MTK 4.4 কার্নেলের জন্য পারফেক্ট)
         echo "Downloading Clang..."
         wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/android-10.0.4/clang-r353392d.tar.gz
         mkdir clang && tar -xf clang-r353392d.tar.gz -C clang
