@@ -39,7 +39,6 @@ jobs:
 
     - name: Setup Clang-6
       run: |
-        # Create symlinks for clang-6
         update-alternatives --install /usr/bin/clang clang /usr/bin/clang-6.0 100
         update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-6.0 100
         update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-6.0 100
@@ -60,6 +59,12 @@ jobs:
         # Remove -Werror from all Makefiles and Kbuild files
         find . -type f \( -name "Makefile" -o -name "Kbuild" \) \
           -exec sed -i 's/-Werror//g' {} + 2>/dev/null || true
+        
+        # Remove -implicit-function-declaration flag (not supported by gcc 7)
+        find . -type f \( -name "Makefile" -o -name "Kbuild" \) \
+          -exec sed -i 's/-Wimplicit-function-declaration//g' {} + 2>/dev/null || true
+        find . -type f \( -name "Makefile" -o -name "Kbuild" \) \
+          -exec sed -i 's/-Wno-implicit-function-declaration//g' {} + 2>/dev/null || true
         
         # Fix dtc lexer issue
         if [ -f scripts/dtc/dtc-lexer.lex.c_shipped ]; then
