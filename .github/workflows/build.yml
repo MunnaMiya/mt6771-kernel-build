@@ -279,7 +279,7 @@ jobs:
         echo "Kernel config copied to walton_defconfig"
         wc -l kernel-source/arch/arm64/configs/walton_defconfig
 
-    - name: Configure Kernel
+    - name: Configure and Build Kernel
       run: |
         cd kernel-source
         
@@ -287,80 +287,59 @@ jobs:
         CLANG_DIR="${CLANG_DIR:-/usr/bin}"
         CLANG_BIN="${CLANG_DIR}/clang"
         
-        # Verify clang exists
-        if [ ! -f "$CLANG_BIN" ] && [ ! -x "$CLANG_BIN" ]; then
-          echo "Specified clang not found at $CLANG_BIN, trying PATH"
+        if [ ! -f "$CLANG_BIN" ] || [ ! -x "$CLANG_BIN" ]; then
           CLANG_BIN="clang"
         fi
         
         echo "Using clang: $CLANG_BIN"
         $CLANG_BIN --version 2>&1 | head -1 || echo "Version check failed"
         
-        # Configure
-        make ARCH=arm64 \
-             O=out \
-             CROSS_COMPILE=aarch64-linux-gnu- \
-             CC="$CLANG_BIN" \
-             CLANG_TRIPLE=aarch64-linux-gnu- \
-             walton_defconfig
-        
-        echo "Configuration complete"
-        
-        # Show important config
-        if [ -f out/.config ]; then
-          echo ""
-          echo "=== Key Config Options ==="
-          grep -E "CPU_FREQ|GPU_FREQ|THERMAL|OVERCLOCK|MT6771|MTK_" out/.config | head -25
-        fi
-
-    - name: Build Kernel
-      run: |
-        cd kernel-source
-        
-        # Setup clang path
-        CLANG_DIR="${CLANG_DIR:-/usr/bin}"
-        CLANG_BIN="${CLANG_DIR}/clang"
-        
-        if [ ! -f "$CLANG_BIN" ] && [ ! -x "$CLANG_BIN" ]; then
-          CLANG_BIN="clang"
-        fi
-        
         export ARCH=arm64
         export CROSS_COMPILE=aarch64-linux-gnu-
+        export CC="$CLANG_BIN"
+        export CLANG_TRIPLE=aarch64-linux-gnu-
         
+        echo "========================================="
+        echo "Configuring kernel..."
+        echo "========================================="
+        
+        # Configure in-tree (not O=out)
+        make walton_defconfig
+        
+        echo ""
+        echo "Configuration complete"
+        
+        # Show important config options
+        echo "=== Key Config Options ==="
+        grep -E "CPU_FREQ|GPU_FREQ|THERMAL|OVERCLOCK|MT6771|MTK_" .config | head -25
+        
+        echo ""
         echo "========================================="
         echo "Building kernel..."
         echo "Compiler: $($CLANG_BIN --version 2>&1 | head -1)"
         echo "Jobs: $(nproc)"
         echo "========================================="
         
-        # Build
-        make O=out \
-             CC="$CLANG_BIN" \
-             CLANG_TRIPLE=aarch64-linux-gnu- \
+        # Build in-tree
+        make -j$(nproc) \
              HOSTCFLAGS="-fcommon" \
              KCFLAGS="-Wno-error -Wno-implicit-fallthrough -fno-integrated-as" \
-             -j$(nproc) Image.gz 2>&1 | tee build.log
+             Image.gz 2>&1 | tee build.log
         
         BUILD_EXIT=${PIPESTATUS[0]}
         
         echo ""
         echo "Build exit code: $BUILD_EXIT"
         
-        if [ -f out/arch/arm64/boot/Image.gz ]; then
+        if [ -f arch/arm64/boot/Image.gz ]; then
           echo ""
           echo "========================================="
           echo "  BUILD SUCCESSFUL!"
           echo "========================================="
-          ls -lh out/arch/arm64/boot/Image.gz
+          ls -lh arch/arm64/boot/Image.gz
           echo ""
           echo "Kernel version string:"
-          strings out/arch/arm64/boot/Image.gz | grep "Linux version" || echo "Could not extract version"
-          echo ""
-          
-          # Copy to expected location
-          mkdir -p arch/arm64/boot
-          cp out/arch/arm64/boot/Image.gz arch/arm64/boot/Image.gz
+          strings arch/arm64/boot/Image.gz | grep "Linux version" || echo "Could not extract version"
         else
           echo ""
           echo "========================================="
@@ -383,14 +362,20 @@ jobs:
         path: kernel-source/arch/arm64/boot/Image.gz
         retention-days: 30
 
-    - name: Upload Build Artifacts
+    - name: Upload Build Log
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: build-artifacts
-        path: |
-          kernel-source/build.log
-          kernel-source/out/.config
+        name: build-log
+        path: kernel-source/build.log
+        retention-days: 7
+
+    - name: Upload Config
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: kernel-config
+        path: kernel-source/.config
         retention-days: 7
 
     - name: Upload Patched Sources
