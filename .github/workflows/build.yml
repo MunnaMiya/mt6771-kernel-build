@@ -32,10 +32,14 @@ jobs:
 
     - name: Fix Build Issues
       run: |
-        sed -i 's/YYLTYPE yylloc/extern YYLTYPE yylloc/' \
-          kernel-source/scripts/dtc/dtc-lexer.lex.c_shipped
         sed -i 's/ -Werror//g' kernel-source/Makefile
         sed -i 's/ -Werror//g' kernel-source/arch/arm64/Makefile
+        sed -i 's/YYLTYPE yylloc/extern YYLTYPE yylloc/g' \
+          kernel-source/scripts/dtc/dtc-lexer.lex.c_shipped
+        sed -i 's/YYLTYPE yylloc/extern YYLTYPE yylloc/g' \
+          kernel-source/scripts/dtc/dtc-parser.tab.c_shipped || true
+        echo "Verify dtc patch:"
+        grep "yylloc" kernel-source/scripts/dtc/dtc-lexer.lex.c_shipped | head -3
 
     - name: Patch CPU OPP
       shell: python3 {0}
@@ -73,7 +77,6 @@ jobs:
       run: |
         cp kernel_config.txt \
           kernel-source/arch/arm64/configs/walton_defconfig
-        wc -l kernel-source/arch/arm64/configs/walton_defconfig
 
     - name: Configure Kernel
       run: |
@@ -89,10 +92,19 @@ jobs:
         make ARCH=arm64 \
              CROSS_COMPILE=aarch64-linux-gnu- \
              CC=aarch64-linux-gnu-gcc-10 \
+             HOSTCFLAGS="-fcommon" \
              KCFLAGS="-Wno-error -Wno-attribute-alias -Wno-stringop-overflow -Wno-array-bounds" \
              -j$(nproc) Image.gz 2>&1 | tee build.log
-        echo "Exit code: $?"
-        ls -lh arch/arm64/boot/Image.gz 2>/dev/null || echo "FAILED: Image.gz not found"
+        BUILD_RESULT=${PIPESTATUS[0]}
+        echo "Exit code: $BUILD_RESULT"
+        if [ -f arch/arm64/boot/Image.gz ]; then
+          echo "SUCCESS: Image.gz found"
+          ls -lh arch/arm64/boot/Image.gz
+        else
+          echo "FAILED: Image.gz not found"
+          grep -i "error:" build.log | tail -20
+          exit 1
+        fi
 
     - name: Upload Kernel
       uses: actions/upload-artifact@v4
