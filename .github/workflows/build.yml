@@ -41,10 +41,19 @@ jobs:
     - name: Fix Build Issues
       run: |
         cd kernel-source
+        # Remove -Werror
         find . -type f \( -name "Makefile" -o -name "Kbuild" \) \
           -exec sed -i 's/-Werror//g' {} + 2>/dev/null || true
+        # Remove implicit-function-declaration flag that GCC doesn't support
+        echo "Stripping implicit-function-declaration flags..."
+        grep -rl "implicit-function-declaration" . 2>/dev/null | while read f; do
+          sed -i '/implicit-function-declaration/d' "$f"
+          echo "  Fixed: $f"
+        done
+        # Fix dtc lexer
         sed -i '/^YYLTYPE yylloc;/s/^/extern /' \
           scripts/dtc/dtc-lexer.lex.c_shipped 2>/dev/null || true
+        # Fix irqdesc.c
         sed -i 's/(desc && desc->action && desc->action->name) ?/(0) ?/g' \
           kernel/irq/irqdesc.c
         echo "Fixes applied"
