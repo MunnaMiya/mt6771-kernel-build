@@ -18,11 +18,9 @@ jobs:
         sudo apt install -y git wget curl bc \
           libssl-dev libelf-dev bison flex \
           gcc-aarch64-linux-gnu \
-          g++-aarch64-linux-gnu \
           binutils-aarch64-linux-gnu \
           build-essential libncurses-dev python3 \
-          gcc-10-aarch64-linux-gnu \
-          g++-10-aarch64-linux-gnu
+          clang-10 llvm-10 lld-10
 
     - name: Clone Nokia MT6771 Kernel
       run: |
@@ -34,11 +32,9 @@ jobs:
       run: |
         sed -i 's/ -Werror//g' kernel-source/Makefile
         sed -i 's/ -Werror//g' kernel-source/arch/arm64/Makefile
-        sed -i 's/YYLTYPE yylloc/extern YYLTYPE yylloc/g' \
+        sed -i '/^YYLTYPE yylloc;/s/^/extern /' \
           kernel-source/scripts/dtc/dtc-lexer.lex.c_shipped
-        sed -i 's/YYLTYPE yylloc/extern YYLTYPE yylloc/g' \
-          kernel-source/scripts/dtc/dtc-parser.tab.c_shipped || true
-        echo "Verify dtc patch:"
+        echo "DTC patch check:"
         grep "yylloc" kernel-source/scripts/dtc/dtc-lexer.lex.c_shipped | head -3
 
     - name: Patch CPU OPP
@@ -83,7 +79,8 @@ jobs:
         cd kernel-source
         make ARCH=arm64 \
              CROSS_COMPILE=aarch64-linux-gnu- \
-             CC=aarch64-linux-gnu-gcc-10 \
+             CC=clang-10 \
+             CLANG_TRIPLE=aarch64-linux-gnu- \
              walton_defconfig
 
     - name: Build Kernel
@@ -91,9 +88,10 @@ jobs:
         cd kernel-source
         make ARCH=arm64 \
              CROSS_COMPILE=aarch64-linux-gnu- \
-             CC=aarch64-linux-gnu-gcc-10 \
+             CC=clang-10 \
+             CLANG_TRIPLE=aarch64-linux-gnu- \
              HOSTCFLAGS="-fcommon" \
-             KCFLAGS="-Wno-error -Wno-attribute-alias -Wno-stringop-overflow -Wno-array-bounds" \
+             KCFLAGS="-Wno-error" \
              -j$(nproc) Image.gz 2>&1 | tee build.log
         BUILD_RESULT=${PIPESTATUS[0]}
         echo "Exit code: $BUILD_RESULT"
@@ -102,7 +100,7 @@ jobs:
           ls -lh arch/arm64/boot/Image.gz
         else
           echo "FAILED: Image.gz not found"
-          grep -i "error:" build.log | tail -20
+          grep -i "error:" build.log | tail -30
           exit 1
         fi
 
