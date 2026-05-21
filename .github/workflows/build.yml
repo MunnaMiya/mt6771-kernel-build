@@ -19,13 +19,7 @@ jobs:
           libncurses5-dev python3 python \
           gcc-aarch64-linux-gnu \
           binutils-aarch64-linux-gnu \
-          cpio rsync ca-certificates gnupg \
-          clang-6.0 llvm-6.0 lld-6.0
-
-    - name: Setup Clang 6
-      run: |
-        update-alternatives --install /usr/bin/clang clang /usr/bin/clang-6.0 100
-        clang --version
+          cpio rsync ca-certificates gnupg
 
     - name: Get kernel_config from repo
       env:
@@ -99,8 +93,6 @@ jobs:
         cd kernel-source
         make ARCH=arm64 \
              CROSS_COMPILE=aarch64-linux-gnu- \
-             CC=clang-6.0 \
-             CLANG_TRIPLE=aarch64-linux-gnu- \
              walton_defconfig
 
     - name: Build Kernel
@@ -110,10 +102,7 @@ jobs:
         set -o pipefail
         make ARCH=arm64 \
              CROSS_COMPILE=aarch64-linux-gnu- \
-             CC=clang-6.0 \
-             CLANG_TRIPLE=aarch64-linux-gnu- \
              HOSTCFLAGS="-fcommon" \
-             KCFLAGS="-no-integrated-as" \
              -j$(nproc) Image.gz 2>&1 | tee build.log
         BUILD_RESULT=${PIPESTATUS[0]}
         echo "Exit code: $BUILD_RESULT"
