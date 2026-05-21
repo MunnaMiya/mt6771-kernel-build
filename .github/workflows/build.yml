@@ -42,7 +42,6 @@ jobs:
         update-alternatives --install /usr/bin/clang clang /usr/bin/clang-6.0 100
         update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-6.0 100
         update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-6.0 100
-        
         echo "Clang version:"
         clang --version
 
@@ -56,15 +55,16 @@ jobs:
       run: |
         cd kernel-source
         
-        # Remove -Werror from all Makefiles and Kbuild files
+        # Remove all -Werror
         find . -type f \( -name "Makefile" -o -name "Kbuild" \) \
           -exec sed -i 's/-Werror//g' {} + 2>/dev/null || true
         
-        # Remove -implicit-function-declaration flag (not supported by gcc 7)
-        find . -type f \( -name "Makefile" -o -name "Kbuild" \) \
-          -exec sed -i 's/-Wimplicit-function-declaration//g' {} + 2>/dev/null || true
-        find . -type f \( -name "Makefile" -o -name "Kbuild" \) \
-          -exec sed -i 's/-Wno-implicit-function-declaration//g' {} + 2>/dev/null || true
+        # Completely remove the problematic -Wimplicit-function-declaration flag from ALL files
+        echo "Stripping implicit-function-declaration flags..."
+        grep -rl "implicit-function-declaration" . 2>/dev/null | while read f; do
+          sed -i '/implicit-function-declaration/d' "$f"
+          echo "  Fixed: $f"
+        done
         
         # Fix dtc lexer issue
         if [ -f scripts/dtc/dtc-lexer.lex.c_shipped ]; then
@@ -230,6 +230,7 @@ jobs:
         echo "Kernel config copied to walton_defconfig"
 
     - name: Configure and Build Kernel
+      shell: bash
       run: |
         cd kernel-source
         
@@ -254,11 +255,9 @@ jobs:
         echo "Building kernel..."
         echo "========================================="
         
-        make -j$(nproc) \
-             HOSTCFLAGS="-fcommon" \
-             Image.gz 2>&1 | tee build.log
-        
-        BUILD_EXIT=${PIPESTATUS[0]}
+        set -o pipefail
+        make -j$(nproc) HOSTCFLAGS="-fcommon" Image.gz 2>&1 | tee build.log
+        BUILD_EXIT=$?
         
         echo ""
         echo "Build exit code: $BUILD_EXIT"
