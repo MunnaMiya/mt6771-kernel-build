@@ -6,15 +6,17 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:18.04
 
     steps:
     - name: Install Dependencies
       run: |
-        sudo apt-get update
-        sudo apt-get install -y git wget curl bc bison flex \
+        apt-get update
+        apt-get install -y git wget curl bc bison flex \
           build-essential libssl-dev libelf-dev \
-          libncurses-dev python3 python3-pip \
+          libncurses5-dev python3 python \
           gcc-aarch64-linux-gnu \
           binutils-aarch64-linux-gnu \
           cpio rsync ca-certificates gnupg
@@ -55,8 +57,11 @@ jobs:
           kernel/irq/irqdesc.c
 
         # Add include paths for missing headers
+        # helio-dvfsrc.h (drivers/devfreq)
         sed -i '1i ccflags-y += -I$(srctree)/drivers/devfreq' \
           drivers/devfreq/Makefile
+
+        # mtk_cm_mgr.h (cm_mgr_v1)
         sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/cm_mgr_v1' \
           drivers/misc/mediatek/base/power/cm_mgr_v1/Makefile
 
