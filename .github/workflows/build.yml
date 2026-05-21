@@ -6,26 +6,18 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    container:
-      image: ubuntu:20.04
+    runs-on: ubuntu-20.04
 
     steps:
     - name: Install Dependencies
       run: |
-        apt-get update
-        apt-get install -y git wget curl bc bison flex \
+        sudo apt-get update
+        sudo apt-get install -y git wget curl bc bison flex \
           build-essential libssl-dev libelf-dev \
           libncurses-dev python3 python3-pip \
           gcc-aarch64-linux-gnu \
           binutils-aarch64-linux-gnu \
-          cpio rsync ca-certificates gnupg \
-          clang-10 llvm-10 lld-10
-
-    - name: Setup Clang-10
-      run: |
-        update-alternatives --install /usr/bin/clang clang /usr/bin/clang-10 100
-        clang --version
+          cpio rsync ca-certificates gnupg
 
     - name: Get kernel_config from repo
       env:
@@ -114,8 +106,6 @@ jobs:
         cd kernel-source
         make ARCH=arm64 \
              CROSS_COMPILE=aarch64-linux-gnu- \
-             CC=clang \
-             CLANG_TRIPLE=aarch64-linux-gnu- \
              walton_defconfig
 
     - name: Build Kernel
@@ -125,10 +115,7 @@ jobs:
         set -o pipefail
         make ARCH=arm64 \
              CROSS_COMPILE=aarch64-linux-gnu- \
-             CC=clang \
-             CLANG_TRIPLE=aarch64-linux-gnu- \
              HOSTCFLAGS="-fcommon" \
-             KCFLAGS="-no-integrated-as -Wno-error" \
              -j$(nproc) Image.gz 2>&1 | tee build.log
         BUILD_RESULT=${PIPESTATUS[0]}
         echo "Exit code: $BUILD_RESULT"
