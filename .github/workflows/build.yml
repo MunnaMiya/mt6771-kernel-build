@@ -104,6 +104,7 @@ jobs:
              walton_defconfig
 
     - name: Build Kernel
+      shell: bash
       run: |
         cd kernel-source
         set -o pipefail
