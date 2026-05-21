@@ -113,6 +113,7 @@ jobs:
              CC=clang-6.0 \
              CLANG_TRIPLE=aarch64-linux-gnu- \
              HOSTCFLAGS="-fcommon" \
+             KCFLAGS="-no-integrated-as" \
              -j$(nproc) Image.gz 2>&1 | tee build.log
         BUILD_RESULT=${PIPESTATUS[0]}
         echo "Exit code: $BUILD_RESULT"
