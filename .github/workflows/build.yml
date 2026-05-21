@@ -1,113 +1,172 @@
-name: Build MT6771 Kernel OC
+name: Build MT6771 RX7 Mini Kernel
+
 on:
   workflow_dispatch:
-  push:
-    branches: [ main ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
+
     - name: Checkout
       uses: actions/checkout@v4
 
     - name: Install Dependencies
       run: |
         sudo apt update
-        sudo apt install -y git wget curl bc \
-          libssl-dev libelf-dev bison flex \
-          gcc-aarch64-linux-gnu \
-          binutils-aarch64-linux-gnu \
-          build-essential libncurses-dev python3 \
-          clang-15 llvm-15
 
-    - name: Clone Nokia MT6771 Kernel
+        sudo apt install -y \
+          git \
+          bc \
+          bison \
+          flex \
+          curl \
+          zip \
+          unzip \
+          build-essential \
+          gcc-aarch64-linux-gnu \
+          g++-aarch64-linux-gnu \
+          binutils-aarch64-linux-gnu \
+          libssl-dev \
+          libelf-dev \
+          libncurses-dev \
+          python3 \
+          cpio \
+          rsync
+
+    # Android Clang 6.0.2
+    - name: Download Android Clang 6.0.2
+      run: |
+        mkdir clang
+        cd clang
+
+        wget -q \
+        https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/clang-r316199.tar.gz
+
+        tar -xzf clang-r316199.tar.gz
+
+        echo "CLANG_PATH=$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_ENV
+
+        $GITHUB_WORKSPACE/clang/bin/clang --version || true
+
+    # Clone MT6771 Source
+    - name: Clone Kernel Source
       run: |
         git clone --depth=1 \
-          https://github.com/nokia-dev/android_kernel_nokia_mt6771.git \
-          kernel-source
+        https://github.com/nokia-dev/android_kernel_nokia_mt6771.git \
+        kernel-source
 
-    - name: Fix Build Issues
+    # Fix old kernel dtc lexer
+    - name: Fix DTC Build Error
       run: |
-        sed -i 's/ -Werror//g' kernel-source/Makefile
-        sed -i 's/ -Werror//g' kernel-source/arch/arm64/Makefile
-        sed -i '/^YYLTYPE yylloc;/s/^/extern /' \
-          kernel-source/scripts/dtc/dtc-lexer.lex.c_shipped
-        echo "Build fixes applied"
+        sed -i 's/extern YYLTYPE yylloc;/YYLTYPE yylloc;/g' \
+        kernel-source/scripts/dtc/dtc-lexer.l || true
 
-    - name: Patch CPU OPP
+    # Apply CPU OC Patch
+    - name: Patch CPU Segment
       shell: python3 {0}
       run: |
         path = "kernel-source/drivers/misc/mediatek/base/power/cpufreq_v1/src/mach/mt6771/mtk_cpufreq_platform.c"
+
         with open(path, "r") as f:
             content = f.read()
+
         old = "unsigned int _mt_cpufreq_get_cpu_level(void)\n{\n\tunsigned int lv = CPU_LEVEL_0;\n\tunsigned int temp = 0;\n\tunsigned int segcode = 0;\n\tunsigned int bincode = 0;\n\tunsigned int turbocode = 0;\n\tunsigned int a_code = 0;"
+
         new = "unsigned int _mt_cpufreq_get_cpu_level(void)\n{\n\tturbo_flag = 0;\n\treturn CPU_LEVEL_0;\n\tunsigned int lv = CPU_LEVEL_0;\n\tunsigned int temp = 0;\n\tunsigned int segcode = 0;\n\tunsigned int bincode = 0;\n\tunsigned int turbocode = 0;\n\tunsigned int a_code = 0;"
+
         if old in content:
             content = content.replace(old, new)
-            print("CPU patch applied OK")
+            print("CPU patch applied")
         else:
-            print("CPU patch string NOT found")
+            print("CPU patch NOT found")
+
         with open(path, "w") as f:
             f.write(content)
 
+    # Apply GPU OC Patch
     - name: Patch GPU Segment
       shell: python3 {0}
       run: |
         path = "kernel-source/drivers/misc/mediatek/base/power/mt6771/mtk_gpufreq_core.c"
+
         with open(path, "r") as f:
             content = f.read()
+
         old = "\tif (g_efuse_speed_bound_id == 0x03000000) {\n\t\t/* 900MHz Version */\n\t\tg_segment_id = MT6771_SEGMENT_1;\n\t} else if (g_efuse_speed_bound_id == 0x05000000) {\n\t\t/* 800MHz Version */\n\t\tg_segment_id = MT6771_SEGMENT_2;\n\t} else if (g_efuse_speed_bound_id == 0x07000000) {\n\t\t/* 700MHz Version */\n\t\tg_segment_id = MT6771_SEGMENT_3;\n\t} else if (g_efuse_speed_bound_id == 0x02000000 && g_efuse_turbo_id == 0x00000008) {\n\t\t/* 900MHz Version */\n\t\tg_segment_id = MT6771_SEGMENT_4;\n\t} else {\n\t\t/* Other Version, set default segment */\n\t\tg_segment_id = MT6771_SEGMENT_2;\n\t}"
-        new = "\t/* OC patch: force Segment 1 = 900MHz GPU */\n\tg_segment_id = MT6771_SEGMENT_1;"
+
+        new = "\t/* Force 900MHz GPU */\n\tg_segment_id = MT6771_SEGMENT_1;"
+
         if old in content:
             content = content.replace(old, new)
-            print("GPU patch applied OK")
+            print("GPU patch applied")
         else:
-            print("GPU patch string NOT found")
+            print("GPU patch NOT found")
+
         with open(path, "w") as f:
             f.write(content)
 
-    - name: Copy Kernel Config
+    # Copy extracted config
+    - name: Copy RX7 Mini Config
       run: |
         cp kernel_config.txt \
-          kernel-source/arch/arm64/configs/walton_defconfig
+        kernel-source/arch/arm64/configs/walton_defconfig
 
+    # Fix clang inline asm issue
+    - name: Fix Old Clang Inline ASM
+      run: |
+        sed -i 's/asm volatile/asm/g' \
+        kernel-source/include/linux/kbuild.h || true
+
+    # Configure
     - name: Configure Kernel
       run: |
         cd kernel-source
-        make ARCH=arm64 \
-             CROSS_COMPILE=aarch64-linux-gnu- \
-             CC=clang-15 \
-             CLANG_TRIPLE=aarch64-linux-gnu- \
-             walton_defconfig
 
+        export ARCH=arm64
+        export SUBARCH=arm64
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        export CLANG_TRIPLE=aarch64-linux-gnu-
+        export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
+
+        make CC=clang walton_defconfig
+
+    # Build
     - name: Build Kernel
       run: |
         cd kernel-source
-        make ARCH=arm64 \
-             CROSS_COMPILE=aarch64-linux-gnu- \
-             CC=clang-15 \
-             CLANG_TRIPLE=aarch64-linux-gnu- \
-             HOSTCFLAGS="-fcommon" \
-             KCFLAGS="-Wno-error -fno-integrated-as" \
-             -j$(nproc) Image.gz 2>&1 | tee build.log
-        BUILD_RESULT=${PIPESTATUS[0]}
-        echo "Exit code: $BUILD_RESULT"
-        if [ -f arch/arm64/boot/Image.gz ]; then
-          echo "SUCCESS"
-          ls -lh arch/arm64/boot/Image.gz
-        else
-          echo "FAILED"
-          grep "error:" build.log | grep -v "warning:" | tail -30
-          exit 1
-        fi
 
+        export ARCH=arm64
+        export SUBARCH=arm64
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        export CLANG_TRIPLE=aarch64-linux-gnu-
+        export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
+
+        make \
+          CC=clang \
+          HOSTCC=gcc \
+          HOSTCXX=g++ \
+          -j4 Image.gz 2>&1 | tee build.log
+
+    # Verify
+    - name: Verify Output
+      run: |
+        cd kernel-source
+
+        echo "==== BOOT FILES ===="
+        find arch/arm64/boot/ -type f
+
+        ls -lh arch/arm64/boot/Image.gz || true
+
+    # Upload
     - name: Upload Kernel
       uses: actions/upload-artifact@v4
       if: always()
+
       with:
-        name: kernel-oc
+        name: rx7mini-kernel
+
         path: |
           kernel-source/arch/arm64/boot/Image.gz
           kernel-source/build.log
