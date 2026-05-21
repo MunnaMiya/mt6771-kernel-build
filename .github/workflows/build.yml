@@ -1,172 +1,143 @@
-name: Build MT6771 RX7 Mini Kernel
-
+name: Build MT6771 Kernel OC
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04 # ওল্ড টুলচেনের জন্য Ubuntu 20.04 বেশি স্টেবল
 
     steps:
-
     - name: Checkout
       uses: actions/checkout@v4
 
     - name: Install Dependencies
       run: |
         sudo apt update
-
-        sudo apt install -y \
-          git \
-          bc \
-          bison \
-          flex \
-          curl \
-          zip \
-          unzip \
-          build-essential \
-          gcc-aarch64-linux-gnu \
-          g++-aarch64-linux-gnu \
-          binutils-aarch64-linux-gnu \
-          libssl-dev \
-          libelf-dev \
-          libncurses-dev \
-          python3 \
-          cpio \
-          rsync
-
-    # Android Clang 6.0.2
-    - name: Download Android Clang 6.0.2
+        sudo apt install -y git wget curl bc \
+          libssl-dev libelf-dev bison flex \
+          build-essential libncurses-dev python3 \
+          zip unzip liblz4-tool lz4
+          
+    - name: Download AOSP Clang & GCC Toolchains
       run: |
-        mkdir clang
-        cd clang
+        mkdir -p $GITHUB_WORKSPACE/toolchains
+        cd $GITHUB_WORKSPACE/toolchains
+        
+        # Download AOSP Clang 10.0.4 (MTK 4.4 কার্নেলের জন্য বেস্ট এবং বাগ-ফ্রি)
+        echo "Downloading Clang..."
+        wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/android-10.0.4/clang-r353392d.tar.gz
+        mkdir clang && tar -xf clang-r353392d.tar.gz -C clang
+        
+        # Download GCC Aarch64 & ARM for Sub-Architecture Linking
+        echo "Downloading GCC Aarch64..."
+        git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b pie-release gcc64
+        echo "Downloading GCC ARM..."
+        git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androdeabi-4.9 -b pie-release gcc32
 
-        wget -q \
-        https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/clang-r316199.tar.gz
-
-        tar -xzf clang-r316199.tar.gz
-
-        echo "CLANG_PATH=$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_ENV
-
-        $GITHUB_WORKSPACE/clang/bin/clang --version || true
-
-    # Clone MT6771 Source
-    - name: Clone Kernel Source
+    - name: Clone Nokia MT6771 Kernel
       run: |
         git clone --depth=1 \
-        https://github.com/nokia-dev/android_kernel_nokia_mt6771.git \
-        kernel-source
+          https://github.com/nokia-dev/android_kernel_nokia_mt6771.git \
+          kernel-source
 
-    # Fix old kernel dtc lexer
-    - name: Fix DTC Build Error
+    - name: Fix Build Issues & DTC
       run: |
-        sed -i 's/extern YYLTYPE yylloc;/YYLTYPE yylloc;/g' \
-        kernel-source/scripts/dtc/dtc-lexer.l || true
+        cd kernel-source
+        sed -i 's/ -Werror//g' Makefile
+        sed -i 's/ -Werror//g' arch/arm64/Makefile
+        # ওল্ড স্ক্রিপ্ট ও ডুপ্লিকেট YYLTYPE ডিক্লারেশন ফিক্স
+        sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped
+        echo "Build fixes applied"
 
-    # Apply CPU OC Patch
-    - name: Patch CPU Segment
+    - name: Patch CPU OPP
       shell: python3 {0}
       run: |
         path = "kernel-source/drivers/misc/mediatek/base/power/cpufreq_v1/src/mach/mt6771/mtk_cpufreq_platform.c"
-
         with open(path, "r") as f:
             content = f.read()
-
-        old = "unsigned int _mt_cpufreq_get_cpu_level(void)\n{\n\tunsigned int lv = CPU_LEVEL_0;\n\tunsigned int temp = 0;\n\tunsigned int segcode = 0;\n\tunsigned int bincode = 0;\n\tunsigned int turbocode = 0;\n\tunsigned int a_code = 0;"
-
-        new = "unsigned int _mt_cpufreq_get_cpu_level(void)\n{\n\tturbo_flag = 0;\n\treturn CPU_LEVEL_0;\n\tunsigned int lv = CPU_LEVEL_0;\n\tunsigned int temp = 0;\n\tunsigned int segcode = 0;\n\tunsigned int bincode = 0;\n\tunsigned int turbocode = 0;\n\tunsigned int a_code = 0;"
-
+        
+        # ক্লিন অ্যান্ড অল্টারনেটিভ ম্যাচিং (যদি আগের স্ট্রিং স্পেসের জন্য মিস হয়ে থাকে)
+        old = "unsigned int _mt_cpufreq_get_cpu_level(void)\n{"
+        new = "unsigned int _mt_cpufreq_get_cpu_level(void)\n{\n\tturbo_flag = 0;\n\treturn CPU_LEVEL_0;"
+        
         if old in content:
             content = content.replace(old, new)
-            print("CPU patch applied")
+            print("CPU patch applied OK")
         else:
-            print("CPU patch NOT found")
-
+            print("CPU patch target NOT found! Check file content.")
         with open(path, "w") as f:
             f.write(content)
 
-    # Apply GPU OC Patch
     - name: Patch GPU Segment
       shell: python3 {0}
       run: |
         path = "kernel-source/drivers/misc/mediatek/base/power/mt6771/mtk_gpufreq_core.c"
-
         with open(path, "r") as f:
             content = f.read()
-
-        old = "\tif (g_efuse_speed_bound_id == 0x03000000) {\n\t\t/* 900MHz Version */\n\t\tg_segment_id = MT6771_SEGMENT_1;\n\t} else if (g_efuse_speed_bound_id == 0x05000000) {\n\t\t/* 800MHz Version */\n\t\tg_segment_id = MT6771_SEGMENT_2;\n\t} else if (g_efuse_speed_bound_id == 0x07000000) {\n\t\t/* 700MHz Version */\n\t\tg_segment_id = MT6771_SEGMENT_3;\n\t} else if (g_efuse_speed_bound_id == 0x02000000 && g_efuse_turbo_id == 0x00000008) {\n\t\t/* 900MHz Version */\n\t\tg_segment_id = MT6771_SEGMENT_4;\n\t} else {\n\t\t/* Other Version, set default segment */\n\t\tg_segment_id = MT6771_SEGMENT_2;\n\t}"
-
-        new = "\t/* Force 900MHz GPU */\n\tg_segment_id = MT6771_SEGMENT_1;"
-
-        if old in content:
-            content = content.replace(old, new)
-            print("GPU patch applied")
+        
+        # এফিউজ বাইপাস করে সরাসরি সেগমেন্ট ১ (সর্বোচ্চ ক্লক) ফোর্স করা
+        target_str = "g_segment_id = MT6771_SEGMENT_2;" # অথবা মূল ফাংশন এন্ট্রি ট্র্যাকিং
+        if "g_efuse_speed_bound_id" in content:
+            # সহজ এবং সেফ মেথড: পুরো কন্ডিশন ব্লকের পর ভ্যালু ওভাররাইট করা
+            content = content.replace("g_segment_id = MT6771_SEGMENT_2;", "g_segment_id = MT6771_SEGMENT_1;")
+            content = content.replace("g_segment_id = MT6771_SEGMENT_3;", "g_segment_id = MT6771_SEGMENT_1;")
+            content = content.replace("g_segment_id = MT6771_SEGMENT_4;", "g_segment_id = MT6771_SEGMENT_1;")
+            print("GPU Overclock patch forced to Segment 1")
         else:
-            print("GPU patch NOT found")
-
+            print("GPU patch target NOT found!")
         with open(path, "w") as f:
             f.write(content)
 
-    # Copy extracted config
-    - name: Copy RX7 Mini Config
+    - name: Copy Kernel Config
       run: |
-        cp kernel_config.txt \
-        kernel-source/arch/arm64/configs/walton_defconfig
+        # যদি তোমার রিপোজিটরির রুটে kernel_config.txt থাকে, তবে এটা ঠিকঠাক কাজ করবে
+        if [ -f kernel_config.txt ]; then
+          cp kernel_config.txt kernel-source/arch/arm64/configs/walton_defconfig
+        else
+          # যদি ফাইল না থাকে তবে ওই সোর্সের ডিফল্ট mt6771_defconfig ব্যাকআপ হিসেবে ইউজ হবে
+          cp kernel-source/arch/arm64/configs/mt6771_defconfig kernel-source/arch/arm64/configs/walton_defconfig
+        fi
 
-    # Fix clang inline asm issue
-    - name: Fix Old Clang Inline ASM
-      run: |
-        sed -i 's/asm volatile/asm/g' \
-        kernel-source/include/linux/kbuild.h || true
-
-    # Configure
-    - name: Configure Kernel
-      run: |
-        cd kernel-source
-
-        export ARCH=arm64
-        export SUBARCH=arm64
-        export CROSS_COMPILE=aarch64-linux-gnu-
-        export CLANG_TRIPLE=aarch64-linux-gnu-
-        export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
-
-        make CC=clang walton_defconfig
-
-    # Build
     - name: Build Kernel
       run: |
         cd kernel-source
-
+        
+        # পাথ এনভায়রনমেন্ট সেটআপ
+        COMPILER_PATH=$GITHUB_WORKSPACE/toolchains/clang/bin:$GITHUB_WORKSPACE/toolchains/gcc64/bin:$GITHUB_WORKSPACE/toolchains/gcc32/bin:$PATH
+        
+        export PATH=$COMPILER_PATH
         export ARCH=arm64
         export SUBARCH=arm64
-        export CROSS_COMPILE=aarch64-linux-gnu-
-        export CLANG_TRIPLE=aarch64-linux-gnu-
-        export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
-
-        make \
+        
+        # কনফিগারেশন রান করা
+        make O=out walton_defconfig
+        
+        # মেইন বিল্ড প্রোসেস (AOSP Clang + GCC wrappers)
+        make -j$(nproc) O=out \
           CC=clang \
-          HOSTCC=gcc \
-          HOSTCXX=g++ \
-          -j4 Image.gz 2>&1 | tee build.log
+          CLANG_TRIPLE=aarch64-linux-gnu- \
+          CROSS_COMPILE=aarch64-linux-android- \
+          CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+          HOSTCFLAGS="-fcommon" \
+          KCFLAGS="-fcommon -Wno-error" 2>&1 | tee build.log
+          
+        BUILD_RESULT=${PIPESTATUS[0]}
+        echo "Exit code: $BUILD_RESULT"
+        
+        if [ -f out/arch/arm64/boot/Image.gz ]; then
+          echo "SUCCESS"
+          cp out/arch/arm64/boot/Image.gz ./Image.gz-target
+        else
+          echo "FAILED"
+          grep "error:" build.log | tail -n 50
+          exit 1
+        fi
 
-    # Verify
-    - name: Verify Output
-      run: |
-        cd kernel-source
-
-        echo "==== BOOT FILES ===="
-        find arch/arm64/boot/ -type f
-
-        ls -lh arch/arm64/boot/Image.gz || true
-
-    # Upload
-    - name: Upload Kernel
+    - name: Upload Kernel Output
       uses: actions/upload-artifact@v4
       if: always()
-
       with:
-        name: rx7mini-kernel
-
+        name: Walton-RX7-Mini-OC-Kernel
         path: |
-          kernel-source/arch/arm64/boot/Image.gz
+          kernel-source/Image.gz-target
           kernel-source/build.log
