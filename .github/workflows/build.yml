@@ -73,9 +73,6 @@ jobs:
           drivers/misc/mediatek/cameraisp/src/isp_50/Makefile
         sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/ccu/src/mt6771' \
           drivers/misc/mediatek/ccu/src/mt6771/Makefile
-        # Force include of the mt6771 engine directory for cmdq (fixes cmdq_engine.h)
-        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/cmdq/v3/mt6771' \
-          drivers/misc/mediatek/cmdq/v3/Makefile
 
         echo "Fixes applied"
 
@@ -123,6 +120,7 @@ jobs:
         cd kernel-source
         make ARCH=arm64 \
              CROSS_COMPILE=aarch64-linux-gnu- \
+             MTK_PLATFORM=mt6771 \
              walton_defconfig
 
     - name: Build Kernel
@@ -132,6 +130,7 @@ jobs:
         set -o pipefail
         make ARCH=arm64 \
              CROSS_COMPILE=aarch64-linux-gnu- \
+             MTK_PLATFORM=mt6771 \
              HOSTCFLAGS="-fcommon" \
              -j$(nproc) Image.gz 2>&1 | tee build.log
         BUILD_RESULT=${PIPESTATUS[0]}
