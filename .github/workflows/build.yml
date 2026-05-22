@@ -1,4 +1,4 @@
-name: Inspect other MT6771 kernel for Mali r14p0
+name: Inspect Realme 3 kernel for Mali r14p0
 
 on:
   workflow_dispatch:
@@ -13,21 +13,30 @@ jobs:
     - name: Install git
       run: apt-get update && apt-get install -y git
 
-    - name: Clone a reference MT6771 kernel (Realme 3 / RMX1821)
+    - name: Clone Realme 3 kernel source
       run: |
         git clone --depth=1 \
-          https://github.com/realme-kernel-opensource/realme3_MT6771_kernel_source.git \
+          https://github.com/realme-kernel-opensource/Realme3-kernel-source.git \
           ref-kernel
-        echo "Reference kernel cloned"
 
-    - name: Inspect – find Mali r14p0
+    - name: Inspect – verify Mali r14p0 directory
       run: |
         cd ref-kernel
-        echo "=== Searching for mali-r14p0 ==="
-        find . -type d -name "mali-r14p0" 2>/dev/null
+        echo "=== Checking if mali-r14p0 exists ==="
+        if [ -d "drivers/misc/mediatek/gpu/gpu_mali/mali_bifrost/mali-r14p0" ]; then
+          echo "FOUND: mali-r14p0 directory"
+        else
+          echo "NOT FOUND: mali-r14p0"
+        fi
+
         echo ""
-        echo "=== Mali bifrost directory structure ==="
-        find . -path "*/gpu_mali/mali_bifrost" -maxdepth 3 -type d 2>/dev/null || echo "not found"
+        echo "=== Checking MT6771 platform support ==="
+        if [ -d "drivers/misc/mediatek/gpu/gpu_mali/mali_bifrost/mali-r14p0/drivers/gpu/arm/midgard/platform/mt6771" ]; then
+          echo "FOUND: mt6771 platform directory"
+        else
+          echo "NOT FOUND: mt6771 platform"
+        fi
+
         echo ""
-        echo "=== Any Mali bifrost directories ==="
-        find . -type d -name "mali_bifrost" 2>/dev/null
+        echo "=== Listing top-level contents of mali-r14p0 ==="
+        ls -la drivers/misc/mediatek/gpu/gpu_mali/mali_bifrost/mali-r14p0/
