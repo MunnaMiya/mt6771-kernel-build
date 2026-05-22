@@ -30,7 +30,6 @@ jobs:
           myrepo
         cp myrepo/kernel_config.txt ./kernel_config.txt
         echo "kernel_config.txt ready"
-        wc -l kernel_config.txt
 
     - name: Clone Nokia MT6771 Kernel
       run: |
@@ -41,24 +40,18 @@ jobs:
     - name: Fix Build Issues
       run: |
         cd kernel-source
-        # Remove -Werror
         find . -type f \( -name "Makefile" -o -name "Kbuild" \) \
           -exec sed -i 's/-Werror//g' {} + 2>/dev/null || true
-        # Remove implicit-function-declaration flag
         grep -rl "implicit-function-declaration" . 2>/dev/null | while read f; do
           sed -i '/implicit-function-declaration/d' "$f"
         done
-        # Fix dtc lexer
         sed -i '/^YYLTYPE yylloc;/s/^/extern /' \
           scripts/dtc/dtc-lexer.lex.c_shipped 2>/dev/null || true
-        # Fix irqdesc.c
         sed -i 's/(desc && desc->action && desc->action->name) ?/(0) ?/g' \
           kernel/irq/irqdesc.c
-
-        # --- Global fix: add self-include to every Makefile under drivers/misc/mediatek ---
+        # Auto-include all mediatek subdirs
         python3 -c "
         import os, glob
-
         for makefile in glob.glob('drivers/misc/mediatek/**/Makefile', recursive=True):
             dir = os.path.dirname(makefile)
             line = f'ccflags-y += -I\$(srctree)/{dir}\n'
@@ -67,53 +60,92 @@ jobs:
                 if line.strip() not in content:
                     f.seek(0, 0)
                     f.write(line + content)
-            print(f'Fixed: {makefile} -> -I{dir}')
         "
-
-        # Additional platform-specific include for eccci (modem_sys.h)
-        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci/mt6771' \
-          drivers/misc/mediatek/eccci/Makefile
-
-        # Also fix devfreq and clk/mediatek (as before)
-        sed -i '1i ccflags-y += -I$(srctree)/drivers/devfreq' \
-          drivers/devfreq/Makefile
-        sed -i '1i ccflags-y += -I$(srctree)/drivers/clk/mediatek' \
-          drivers/clk/mediatek/Makefile
-
-        # Set MTK_PLATFORM in top-level Makefile for cmdq_engine.h
+        for d in 'drivers/devfreq' 'drivers/clk/mediatek' 'drivers/misc/mediatek/eccci/mt6771'; do
+          sed -i "1i ccflags-y += -I\$(srctree)/$d" $d/Makefile 2>/dev/null || true
+        done
         echo "MTK_PLATFORM=mt6771" >> Makefile
+        echo "All build fixes applied"
 
-        echo "All fixes applied"
-
-    - name: Patch CPU OPP
+    - name: Patch CPU OPP – Force 1989 MHz @ 1.000V (CPU_LEVEL_0 / V3)
       shell: python3 {0}
       run: |
         path = "kernel-source/drivers/misc/mediatek/base/power/cpufreq_v1/src/mach/mt6771/mtk_cpufreq_platform.c"
         with open(path, "r") as f:
             content = f.read()
-        old = "unsigned int _mt_cpufreq_get_cpu_level(void)\n{\n\tunsigned int lv = CPU_LEVEL_0;\n\tunsigned int temp = 0;\n\tunsigned int segcode = 0;\n\tunsigned int bincode = 0;\n\tunsigned int turbocode = 0;\n\tunsigned int a_code = 0;"
-        new = "unsigned int _mt_cpufreq_get_cpu_level(void)\n{\n\tturbo_flag = 0;\n\treturn CPU_LEVEL_0;\n\tunsigned int lv = CPU_LEVEL_0;\n\tunsigned int temp = 0;\n\tunsigned int segcode = 0;\n\tunsigned int bincode = 0;\n\tunsigned int turbocode = 0;\n\tunsigned int a_code = 0;"
-        if old in content:
-            content = content.replace(old, new)
-            print("CPU patch OK")
-        else:
-            print("CPU patch NOT found")
+
+        # Clean approach: locate the function, find its closing brace, replace body
+        func_start = content.find("unsigned int _mt_cpufreq_get_cpu_level(void)")
+        if func_start == -1:
+            print("ERROR: CPU level function not found")
+            exit(1)
+
+        brace_start = content.find("{", func_start)
+        if brace_start == -1:
+            print("ERROR: Opening brace not found")
+            exit(1)
+
+        # count braces to find matching closing brace
+        count = 1
+        pos = brace_start + 1
+        while count > 0 and pos < len(content):
+            if content[pos] == '{':
+                count += 1
+            elif content[pos] == '}':
+                count -= 1
+            pos += 1
+        func_end = pos  # right after the closing brace
+
+        # Build replacement body (keep the function signature and opening brace)
+        replacement = (
+            content[func_start:brace_start + 1] +
+            "\n\t/* OC: Force CPU_LEVEL_0 = 1989 MHz (2.0 GHz) @ 1.000V (V3 bin) */\n"
+            "\tunsigned int lv = CPU_LEVEL_0;\n"
+            "\tturbo_flag = 0;\n"
+            "\ttag_pr_info(\"%d, %d, (%d, %d)\\n\", lv, turbo_flag, UP_SRATE, DOWN_SRATE);\n"
+            "\treturn lv;\n"
+            "}"
+        )
+        content = content[:func_start] + replacement + content[func_end:]
+        print("CPU patch applied – 1989 MHz @ 1.000V (Tier 2)")
         with open(path, "w") as f:
             f.write(content)
 
-    - name: Patch GPU Segment
+    - name: Patch GPU Segment – Force 900 MHz @ 0.900V (SEGMENT_1)
       shell: python3 {0}
       run: |
         path = "kernel-source/drivers/misc/mediatek/base/power/mt6771/mtk_gpufreq_core.c"
         with open(path, "r") as f:
             content = f.read()
-        old = "\tif (g_efuse_speed_bound_id == 0x03000000) {\n\t\t/* 900MHz Version */\n\t\tg_segment_id = MT6771_SEGMENT_1;\n\t} else if (g_efuse_speed_bound_id == 0x05000000) {\n\t\t/* 800MHz Version */\n\t\tg_segment_id = MT6771_SEGMENT_2;\n\t} else if (g_efuse_speed_bound_id == 0x07000000) {\n\t\t/* 700MHz Version */\n\t\tg_segment_id = MT6771_SEGMENT_3;\n\t} else if (g_efuse_speed_bound_id == 0x02000000 && g_efuse_turbo_id == 0x00000008) {\n\t\t/* 900MHz Version */\n\t\tg_segment_id = MT6771_SEGMENT_4;\n\t} else {\n\t\t/* Other Version, set default segment */\n\t\tg_segment_id = MT6771_SEGMENT_2;\n\t}"
-        new = "\t/* OC patch: force Segment 1 = 900MHz GPU */\n\tg_segment_id = MT6771_SEGMENT_1;"
-        if old in content:
-            content = content.replace(old, new)
-            print("GPU patch OK")
-        else:
-            print("GPU patch NOT found")
+
+        marker = "if (g_efuse_speed_bound_id == 0x03000000)"
+        idx = content.find(marker)
+        if idx == -1:
+            print("ERROR: GPU segment block not found")
+            exit(1)
+
+        block_start = content.rfind("if (g_efuse_speed_bound_id", 0, idx)
+        if block_start == -1:
+            block_start = idx
+
+        brace = 0
+        block_end = block_start
+        for i in range(block_start, min(block_start + 2000, len(content))):
+            if content[i] == '{':
+                brace += 1
+            elif content[i] == '}':
+                brace -= 1
+                if brace == 0:
+                    block_end = i + 1
+                    break
+
+        if block_end == block_start:
+            print("ERROR: Could not find end of GPU segment block")
+            exit(1)
+
+        replacement = "\t/* OC: Force Segment 1 = 900 MHz GPU @ 0.900V */\n\tg_segment_id = MT6771_SEGMENT_1;\n"
+        content = content[:block_start] + replacement + content[block_end:]
+        print("GPU patch applied – 900 MHz @ 0.900V (Tier 2)")
         with open(path, "w") as f:
             f.write(content)
 
@@ -122,7 +154,6 @@ jobs:
         cp kernel_config.txt \
           kernel-source/arch/arm64/configs/walton_defconfig
         echo "Config copied"
-        wc -l kernel-source/arch/arm64/configs/walton_defconfig
 
     - name: Configure Kernel
       run: |
@@ -145,6 +176,7 @@ jobs:
         if [ -f arch/arm64/boot/Image.gz ]; then
           echo "SUCCESS"
           ls -lh arch/arm64/boot/Image.gz
+          strings arch/arm64/boot/Image.gz | grep "Linux version" || true
         else
           echo "FAILED"
           grep "error:" build.log | grep -v "warning:" | tail -20
