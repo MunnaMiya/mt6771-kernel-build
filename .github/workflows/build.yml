@@ -70,6 +70,10 @@ jobs:
             print(f'Fixed: {makefile} -> -I{dir}')
         "
 
+        # Additional platform-specific include for eccci (modem_sys.h)
+        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci/mt6771' \
+          drivers/misc/mediatek/eccci/Makefile
+
         # Also fix devfreq and clk/mediatek (as before)
         sed -i '1i ccflags-y += -I$(srctree)/drivers/devfreq' \
           drivers/devfreq/Makefile
