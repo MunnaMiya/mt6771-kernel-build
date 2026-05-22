@@ -41,40 +41,49 @@ jobs:
     - name: Fix Build Issues
       run: |
         cd kernel-source
+
         # Remove -Werror
         find . -type f \( -name "Makefile" -o -name "Kbuild" \) \
           -exec sed -i 's/-Werror//g' {} + 2>/dev/null || true
+
         # Remove implicit-function-declaration flag
         grep -rl "implicit-function-declaration" . 2>/dev/null | while read f; do
           sed -i '/implicit-function-declaration/d' "$f"
-          echo "  Fixed: $f"
         done
+
         # Fix dtc lexer
         sed -i '/^YYLTYPE yylloc;/s/^/extern /' \
           scripts/dtc/dtc-lexer.lex.c_shipped 2>/dev/null || true
+
         # Fix irqdesc.c
         sed -i 's/(desc && desc->action && desc->action->name) ?/(0) ?/g' \
           kernel/irq/irqdesc.c
 
-        # --- Add include paths for missing headers ---
-        sed -i '1i ccflags-y += -I$(srctree)/drivers/devfreq' \
-          drivers/devfreq/Makefile
-        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/cm_mgr_v1' \
-          drivers/misc/mediatek/base/power/cm_mgr_v1/Makefile
-        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/mt6771' \
-          drivers/misc/mediatek/base/power/mt6771/Makefile
-        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/ppm_v3/src/mach/mt6771' \
-          drivers/misc/mediatek/base/power/ppm_v3/src/mach/mt6771/Makefile
-        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/spm_v4' \
-          drivers/misc/mediatek/base/power/spm_v4/Makefile
-        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/swpm_v1/mt6771' \
-          drivers/misc/mediatek/base/power/swpm_v1/mt6771/Makefile
-        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/cameraisp/src/isp_50' \
-          drivers/misc/mediatek/cameraisp/src/isp_50/Makefile
-        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/ccu/src/mt6771' \
-          drivers/misc/mediatek/ccu/src/mt6771/Makefile
+        # Auto‑include every directory under drivers/misc/mediatek (and a few extras)
+        python3 -c "
+import os, subprocess
 
-        echo "Fixes applied"
+result = subprocess.run(
+    ['find', 'drivers/misc/mediatek', '-type', 'd', '-maxdepth', 6],
+    capture_output=True, text=True
+)
+mtk_dirs = [d for d in result.stdout.strip().split('\n') if d and os.path.isdir(d)]
+
+extra_dirs = [
+    'drivers/devfreq',
+    'drivers/clk/mediatek',
+    'drivers/gpu/mediatek',
+]
+all_dirs = sorted(set(mtk_dirs + [d for d in extra_dirs if os.path.isdir(d)]))
+
+lines = [f'KBUILD_CPPFLAGS += -I\$(srctree)/{d}' for d in all_dirs]
+with open('Makefile', 'a') as f:
+    f.write('\n# Auto include paths for missing MTK headers\n')
+    f.write('\n'.join(lines) + '\n')
+
+print(f'Added {len(lines)} include paths to top‑level Makefile')
+"
+        echo "All fixes applied"
 
     - name: Patch CPU OPP
       shell: python3 {0}
@@ -147,6 +156,8 @@ jobs:
     - name: Upload Kernel
       uses: actions/upload-artifact@v4
       if: always()
+      # Run on the host runner to avoid the Ubuntu 18.04 GLIBC limitation
+      container: ''
       with:
         name: kernel-oc
         path: |
