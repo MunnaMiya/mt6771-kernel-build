@@ -71,9 +71,11 @@ jobs:
           drivers/misc/mediatek/base/power/swpm_v1/mt6771/Makefile
         sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/cameraisp/src/isp_50' \
           drivers/misc/mediatek/cameraisp/src/isp_50/Makefile
-        # New: CCU src/mt6771 directory for ccu_ext_interface/ headers
         sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/ccu/src/mt6771' \
           drivers/misc/mediatek/ccu/src/mt6771/Makefile
+        # New: cmdq v3 directory for cmdq_engine.h
+        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/cmdq/v3' \
+          drivers/misc/mediatek/cmdq/v3/mt6771/Makefile
 
         echo "Fixes applied"
 
