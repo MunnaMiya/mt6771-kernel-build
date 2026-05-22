@@ -74,14 +74,25 @@ jobs:
         sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/ccu/src/mt6771' \
           drivers/misc/mediatek/ccu/src/mt6771/Makefile
 
-        # cmdq_engine.h (cmdq v3) – add to the correct Makefile (subdir or parent)
-        if [ -f drivers/misc/mediatek/cmdq/v3/mt6771/Makefile ]; then
-          sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/cmdq/v3' \
-            drivers/misc/mediatek/cmdq/v3/mt6771/Makefile
-        else
-          sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/cmdq/v3' \
-            drivers/misc/mediatek/cmdq/v3/Makefile
-        fi
+        # Force include path for cmdq_engine.h using Python to be safe
+        python3 << 'EOF'
+        import os
+
+        target = "drivers/misc/mediatek/cmdq/v3"
+        inc_line = "ccflags-y += -I$(srctree)/" + target + "\n"
+
+        # Apply to both possible Makefiles
+        for makefile in [target + "/mt6771/Makefile", target + "/Makefile"]:
+            if os.path.exists(makefile):
+                with open(makefile, "r+") as f:
+                    content = f.read()
+                    if inc_line.strip() not in content:
+                        f.seek(0, 0)
+                        f.write(inc_line + content)
+                        print(f"Added include path to {makefile}")
+            else:
+                print(f"Makefile not found: {makefile}")
+        EOF
 
         echo "Fixes applied"
 
