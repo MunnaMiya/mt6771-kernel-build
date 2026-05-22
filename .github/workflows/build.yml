@@ -118,45 +118,30 @@ jobs:
         with open(path, "r") as f:
             content = f.read()
 
-        # locate the efuse read line
+        # Find the start: the efuse read line
         efuse_line = "g_efuse_speed_bound_id = (readl(g_efuse_base + 0x50) & 0x0F000000);"
-        idx = content.find(efuse_line)
-        if idx == -1:
-            print("ERROR: efuse read not found")
+        start_idx = content.find(efuse_line)
+        if start_idx == -1:
+            print("ERROR: efuse read line not found")
             exit(1)
-        # point after the line
-        start = idx + len(efuse_line)
+        # move past this line
+        start_idx = start_idx + len(efuse_line)
 
-        # Find the next if statement
-        if_pos = content.find("if (g_efuse_speed_bound_id", start)
-        if if_pos == -1:
-            print("ERROR: if chain not found")
-            exit(1)
-
-        # Find the opening brace of the if chain
-        obrace = content.find("{", if_pos)
-        if obrace == -1:
-            print("ERROR: opening brace not found")
+        # Find the end: the log line that prints the selected segment
+        log_line = 'gpufreq_pr_info("@%s: g_efuse_speed_bound_id'
+        end_idx = content.find(log_line, start_idx)
+        if end_idx == -1:
+            print("ERROR: segment log line not found")
             exit(1)
 
-        # Find matching closing brace (the else block end)
-        count = 1
-        pos = obrace + 1
-        while count > 0 and pos < len(content):
-            if content[pos] == '{':
-                count += 1
-            elif content[pos] == '}':
-                count -= 1
-            pos += 1
-        end = pos  # after the closing brace
-
-        # Replace everything from the efuse read to the end of the if-else block
+        # Replace everything from the efuse read to the log line with forced assignment
         replacement = (
+            "\n"
             "\t/* OC: Force Segment 1 = 900 MHz GPU @ 0.900V */\n"
-            "\tg_segment_id = MT6771_SEGMENT_1;\n"
+            "\tg_segment_id = MT6771_SEGMENT_1;\n\n"
         )
-        content = content[:start] + "\n" + replacement + content[end:]
-        print("GPU patch applied")
+        content = content[:start_idx] + replacement + content[end_idx:]
+        print("GPU patch applied – removed old segment chain, forced SEGMENT_1")
         with open(path, "w") as f:
             f.write(content)
 
