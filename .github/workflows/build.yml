@@ -50,7 +50,7 @@ jobs:
         sed -i 's/(desc && desc->action && desc->action->name) ?/(0) ?/g' \
           kernel/irq/irqdesc.c
 
-        # Auto‑include all mediatek subdirectories
+        # ---- AUTO‑INCLUDE: every Makefile gets its own directory ----
         python3 -c "
         import os, glob
         for makefile in glob.glob('drivers/misc/mediatek/**/Makefile', recursive=True):
@@ -62,11 +62,29 @@ jobs:
                     f.seek(0, 0)
                     f.write(line + content)
         "
-        for d in 'drivers/devfreq' 'drivers/clk/mediatek' 'drivers/misc/mediatek/eccci/mt6771'; do
+
+        # ---- Specific cross‑directory includes (common headers) ----
+        for d in \
+          'drivers/devfreq' \
+          'drivers/clk/mediatek' \
+          'drivers/misc/mediatek/eccci/mt6771' \
+          'drivers/misc/mediatek/base/power/cm_mgr_v1' \
+          'drivers/misc/mediatek/base/power/mt6771' \
+          'drivers/misc/mediatek/base/power/ppm_v3/src/mach/mt6771' \
+          'drivers/misc/mediatek/base/power/spm_v4' \
+          'drivers/misc/mediatek/base/power/swpm_v1/mt6771' \
+          'drivers/misc/mediatek/cameraisp/src/isp_50' \
+          'drivers/misc/mediatek/ccu/src/mt6771'; do
+          # add to the directory's own Makefile (some already exist, sed handles it)
           sed -i "1i ccflags-y += -I\$(srctree)/$d" $d/Makefile 2>/dev/null || true
         done
+
+        # Also add the eccci mt6771 include to the parent eccci Makefile
+        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci/mt6771' \
+          drivers/misc/mediatek/eccci/Makefile 2>/dev/null || true
+
         echo "MTK_PLATFORM=mt6771" >> Makefile
-        echo "All build fixes applied"
+        echo "All build fixes applied (headers should now be found automatically)"
 
     - name: Patch CPU OPP – Force 1989 MHz @ 1.000V (CPU_LEVEL_0 / V3)
       shell: python3 {0}
@@ -85,7 +103,6 @@ jobs:
             print("ERROR: opening brace not found")
             exit(1)
 
-        # find matching closing brace
         count = 1
         pos = brace_start + 1
         while count > 0 and pos < len(content):
@@ -96,7 +113,6 @@ jobs:
             pos += 1
         func_end = pos
 
-        # clean replacement
         replacement = (
             content[func_start:brace_start + 1] +
             "\n\t/* OC: Force CPU_LEVEL_0 = 1989 MHz (2.0 GHz) @ 1.000V */\n"
@@ -118,30 +134,26 @@ jobs:
         with open(path, "r") as f:
             content = f.read()
 
-        # Find the start: the efuse read line
         efuse_line = "g_efuse_speed_bound_id = (readl(g_efuse_base + 0x50) & 0x0F000000);"
         start_idx = content.find(efuse_line)
         if start_idx == -1:
-            print("ERROR: efuse read line not found")
+            print("ERROR: efuse read not found")
             exit(1)
-        # move past this line
-        start_idx = start_idx + len(efuse_line)
+        start_idx += len(efuse_line)
 
-        # Find the end: the log line that prints the selected segment
         log_line = 'gpufreq_pr_info("@%s: g_efuse_speed_bound_id'
         end_idx = content.find(log_line, start_idx)
         if end_idx == -1:
             print("ERROR: segment log line not found")
             exit(1)
 
-        # Replace everything from the efuse read to the log line with forced assignment
         replacement = (
             "\n"
             "\t/* OC: Force Segment 1 = 900 MHz GPU @ 0.900V */\n"
             "\tg_segment_id = MT6771_SEGMENT_1;\n\n"
         )
         content = content[:start_idx] + replacement + content[end_idx:]
-        print("GPU patch applied – removed old segment chain, forced SEGMENT_1")
+        print("GPU patch applied")
         with open(path, "w") as f:
             f.write(content)
 
