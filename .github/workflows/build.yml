@@ -59,29 +59,34 @@ jobs:
         sed -i 's/(desc && desc->action && desc->action->name) ?/(0) ?/g' \
           kernel/irq/irqdesc.c
 
-        # Auto‑include every directory under drivers/misc/mediatek (Python 3.6 safe)
+        # Comprehensive include path fix - covers ALL missing headers at once
         python3 -c "
 import os, subprocess
 
+# Find every subdirectory under drivers/misc/mediatek
 result = subprocess.run(
-    ['find', 'drivers/misc/mediatek', '-type', 'd', '-maxdepth', 6],
-    stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True
+    ['find', 'drivers/misc/mediatek', '-type', 'd', '-maxdepth', '6'],
+    capture_output=True, text=True
 )
 mtk_dirs = [d for d in result.stdout.strip().split('\n') if d and os.path.isdir(d)]
 
+# Also add non-MTK dirs that have commonly needed headers
 extra_dirs = [
     'drivers/devfreq',
-    'drivers/clk/mediatek',
     'drivers/gpu/mediatek',
+    'drivers/clk/mediatek',
+    'drivers/thermal',
+    'drivers/regulator',
 ]
 all_dirs = sorted(set(mtk_dirs + [d for d in extra_dirs if os.path.isdir(d)]))
 
+# Append all as KBUILD_CPPFLAGS to top-level Makefile
 lines = [f'KBUILD_CPPFLAGS += -I\$(srctree)/{d}' for d in all_dirs]
 with open('Makefile', 'a') as f:
     f.write('\n# Auto include paths for MTK headers\n')
     f.write('\n'.join(lines) + '\n')
 
-print(f'Added {len(lines)} include paths to top-level Makefile')
+print(f'Added {len(lines)} include paths to Makefile')
 "
         echo "All fixes applied"
 
@@ -129,7 +134,6 @@ print(f'Added {len(lines)} include paths to top-level Makefile')
         cd kernel-source
         make ARCH=arm64 \
              CROSS_COMPILE=aarch64-linux-gnu- \
-             MTK_PLATFORM=mt6771 \
              walton_defconfig
 
     - name: Build Kernel
@@ -139,7 +143,6 @@ print(f'Added {len(lines)} include paths to top-level Makefile')
         set -o pipefail
         make ARCH=arm64 \
              CROSS_COMPILE=aarch64-linux-gnu- \
-             MTK_PLATFORM=mt6771 \
              HOSTCFLAGS="-fcommon" \
              -j$(nproc) Image.gz 2>&1 | tee build.log
         BUILD_RESULT=${PIPESTATUS[0]}
