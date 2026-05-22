@@ -80,12 +80,15 @@ jobs:
           sed -i "1i ccflags-y += -I\$(srctree)/$d" $d/Makefile 2>/dev/null || true
         done
 
-        # ---- FIX for modem_sys.h: add eccci parent directory to mt6771 subdir ----
+        # ---- FIX for modem_sys.h ----
+        # 1. Add eccci parent directory to mt6771 subdir (for sources inside mt6771)
         sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci' \
           drivers/misc/mediatek/eccci/mt6771/Makefile 2>/dev/null || true
 
-        # (backup) ensure parent eccci Makefile also sees the mt6771 subdir
-        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci/mt6771' \
+        # 2. CRITICAL: Add eccci parent directory to the parent eccci Makefile,
+        #    so that ccci_modem.c (in eccci/) can find modem_sys.h via the fallback
+        #    search after ccci_platform.h (in mt6771/) fails to find it locally.
+        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci' \
           drivers/misc/mediatek/eccci/Makefile 2>/dev/null || true
 
         echo "All build fixes applied"
