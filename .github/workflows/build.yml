@@ -55,42 +55,31 @@ jobs:
         sed -i 's/(desc && desc->action && desc->action->name) ?/(0) ?/g' \
           kernel/irq/irqdesc.c
 
-        # --- Inject MTK_PLATFORM and specific includes ---
-        # Add MTK_PLATFORM to top-level Makefile
-        echo "MTK_PLATFORM=mt6771" >> Makefile
-
-        # Specific include fixes (proven working)
-        sed -i '1i ccflags-y += -I$(srctree)/drivers/devfreq' \
-          drivers/devfreq/Makefile
-        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/cm_mgr_v1' \
-          drivers/misc/mediatek/base/power/cm_mgr_v1/Makefile
-        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/mt6771' \
-          drivers/misc/mediatek/base/power/mt6771/Makefile
-        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/ppm_v3/src/mach/mt6771' \
-          drivers/misc/mediatek/base/power/ppm_v3/src/mach/mt6771/Makefile
-        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/spm_v4' \
-          drivers/misc/mediatek/base/power/spm_v4/Makefile
-        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/swpm_v1/mt6771' \
-          drivers/misc/mediatek/base/power/swpm_v1/mt6771/Makefile
-        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/cameraisp/src/isp_50' \
-          drivers/misc/mediatek/cameraisp/src/isp_50/Makefile
-        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/ccu/src/mt6771' \
-          drivers/misc/mediatek/ccu/src/mt6771/Makefile
-
-        # Fix cmdq_engine.h by directly patching cmdq_def.h
-        echo "Fixing cmdq_def.h to include correct cmdq_engine.h path"
+        # --- Global fix: add self-include to every Makefile under drivers/misc/mediatek ---
         python3 -c "
-        path = 'drivers/misc/mediatek/cmdq/v3/cmdq_def.h'
-        with open(path, 'r') as f:
-            content = f.read()
-        # Replace relative include with absolute path
-        content = content.replace('#include \"cmdq_engine.h\"', '#include \"mt6771/cmdq_engine.h\"')
-        with open(path, 'w') as f:
-            f.write(content)
-        print('Patched cmdq_def.h')
+        import os, glob
+
+        for makefile in glob.glob('drivers/misc/mediatek/**/Makefile', recursive=True):
+            dir = os.path.dirname(makefile)
+            line = f'ccflags-y += -I\$(srctree)/{dir}\n'
+            with open(makefile, 'r+') as f:
+                content = f.read()
+                if line.strip() not in content:
+                    f.seek(0, 0)
+                    f.write(line + content)
+            print(f'Fixed: {makefile} -> -I{dir}')
         "
 
-        echo "Build fixes applied"
+        # Also fix devfreq and clk/mediatek (as before)
+        sed -i '1i ccflags-y += -I$(srctree)/drivers/devfreq' \
+          drivers/devfreq/Makefile
+        sed -i '1i ccflags-y += -I$(srctree)/drivers/clk/mediatek' \
+          drivers/clk/mediatek/Makefile
+
+        # Set MTK_PLATFORM in top-level Makefile for cmdq_engine.h
+        echo "MTK_PLATFORM=mt6771" >> Makefile
+
+        echo "All fixes applied"
 
     - name: Patch CPU OPP
       shell: python3 {0}
