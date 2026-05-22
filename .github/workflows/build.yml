@@ -50,7 +50,7 @@ jobs:
         sed -i 's/(desc && desc->action && desc->action->name) ?/(0) ?/g' \
           kernel/irq/irqdesc.c
 
-        # Auto-include every mediatek subdirectory
+        # Auto‑include all mediatek subdirectories
         python3 -c "
         import os, glob
         for makefile in glob.glob('drivers/misc/mediatek/**/Makefile', recursive=True):
@@ -77,12 +77,12 @@ jobs:
 
         func_start = content.find("unsigned int _mt_cpufreq_get_cpu_level(void)")
         if func_start == -1:
-            print("ERROR: CPU level function not found")
+            print("ERROR: CPU function not found")
             exit(1)
 
         brace_start = content.find("{", func_start)
         if brace_start == -1:
-            print("ERROR: Opening brace not found")
+            print("ERROR: opening brace not found")
             exit(1)
 
         # find matching closing brace
@@ -94,12 +94,12 @@ jobs:
             elif content[pos] == '}':
                 count -= 1
             pos += 1
-        func_end = pos  # after the closing brace
+        func_end = pos
 
-        # clean replacement body
+        # clean replacement
         replacement = (
             content[func_start:brace_start + 1] +
-            "\n\t/* OC: Force CPU_LEVEL_0 = 1989 MHz (2.0 GHz) @ 1.000V (V3 bin) */\n"
+            "\n\t/* OC: Force CPU_LEVEL_0 = 1989 MHz (2.0 GHz) @ 1.000V */\n"
             "\tunsigned int lv = CPU_LEVEL_0;\n"
             "\tturbo_flag = 0;\n"
             "\ttag_pr_info(\"%d, %d, (%d, %d)\\n\", lv, turbo_flag, UP_SRATE, DOWN_SRATE);\n"
@@ -107,7 +107,7 @@ jobs:
             "}"
         )
         content = content[:func_start] + replacement + content[func_end:]
-        print("CPU patch applied – 1989 MHz @ 1.000V")
+        print("CPU patch applied")
         with open(path, "w") as f:
             f.write(content)
 
@@ -118,42 +118,45 @@ jobs:
         with open(path, "r") as f:
             content = f.read()
 
-        # Find the line where efuse is read and the if-chain starts
-        marker = "g_efuse_speed_bound_id = (readl(g_efuse_base + 0x50) & 0x0F000000);"
-        idx = content.find(marker)
+        # locate the efuse read line
+        efuse_line = "g_efuse_speed_bound_id = (readl(g_efuse_base + 0x50) & 0x0F000000);"
+        idx = content.find(efuse_line)
         if idx == -1:
-            print("ERROR: GPU efuse assignment not found")
+            print("ERROR: efuse read not found")
+            exit(1)
+        # point after the line
+        start = idx + len(efuse_line)
+
+        # Find the next if statement
+        if_pos = content.find("if (g_efuse_speed_bound_id", start)
+        if if_pos == -1:
+            print("ERROR: if chain not found")
             exit(1)
 
-        # Find the opening brace of the following if-else chain
-        if_start = content.find("if (g_efuse_speed_bound_id", idx)
-        if if_start == -1:
-            print("ERROR: GPU if chain not found")
+        # Find the opening brace of the if chain
+        obrace = content.find("{", if_pos)
+        if obrace == -1:
+            print("ERROR: opening brace not found")
             exit(1)
 
-        # Find the closing brace of the whole if-else (brace counting from the opening brace)
-        open_brace = content.find("{", if_start)
-        if open_brace == -1:
-            print("ERROR: Opening brace of if chain not found")
-            exit(1)
-
+        # Find matching closing brace (the else block end)
         count = 1
-        pos = open_brace + 1
+        pos = obrace + 1
         while count > 0 and pos < len(content):
             if content[pos] == '{':
                 count += 1
             elif content[pos] == '}':
                 count -= 1
             pos += 1
-        chain_end = pos  # after the closing brace of the else block
+        end = pos  # after the closing brace
 
-        # Replace from the efuse read to the end of the if-else with forced segment
+        # Replace everything from the efuse read to the end of the if-else block
         replacement = (
             "\t/* OC: Force Segment 1 = 900 MHz GPU @ 0.900V */\n"
             "\tg_segment_id = MT6771_SEGMENT_1;\n"
         )
-        content = content[:idx] + replacement + content[chain_end:]
-        print("GPU patch applied – 900 MHz @ 0.900V")
+        content = content[:start] + "\n" + replacement + content[end:]
+        print("GPU patch applied")
         with open(path, "w") as f:
             f.write(content)
 
