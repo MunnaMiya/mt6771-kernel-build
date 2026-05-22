@@ -1,4 +1,4 @@
-name: Inspect imgsensor availability
+name: Inspect imgsensor common structure
 
 on:
   workflow_dispatch:
@@ -16,20 +16,14 @@ jobs:
     - name: Clone Nokia MT6771 Kernel
       run: git clone --depth=1 https://github.com/nokia-dev/android_kernel_nokia_mt6771.git kernel-source
 
-    - name: List available sensor directories
+    - name: Show common directory tree (2 levels)
       run: |
         cd kernel-source
-        echo "=== Available sensor directories ==="
-        find drivers/misc/mediatek/imgsensor -maxdepth 2 -type d 2>/dev/null
-        echo ""
-        echo "=== Missing sensors from config ==="
-        echo "Config expects: s5k3l6_mipi_raw s5k5e9yx_mipi_raw s5k4h7yx_mipi_raw"
-        echo "Checking if they exist..."
-        for s in s5k3l6_mipi_raw s5k5e9yx_mipi_raw s5k4h7yx_mipi_raw; do
-          found=$(find drivers/misc/mediatek/imgsensor -type d -name "$s" 2>/dev/null)
-          if [ -n "$found" ]; then
-            echo "  FOUND: $s"
-          else
-            echo "  MISSING: $s"
-          fi
-        done
+        echo "=== common/ tree (depth 2) ==="
+        find drivers/misc/mediatek/imgsensor/src/common -maxdepth 2 -type d 2>/dev/null || echo "no common dir"
+
+    - name: Show mt6771 Makefile
+      run: |
+        cd kernel-source
+        echo "=== mt6771/Makefile ==="
+        cat drivers/misc/mediatek/imgsensor/src/mt6771/Makefile
