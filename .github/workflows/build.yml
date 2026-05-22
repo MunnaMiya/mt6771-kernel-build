@@ -8,7 +8,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: ubuntu:18.04
+      image: ubuntu:20.04
 
     steps:
     - name: Install Dependencies
@@ -16,7 +16,7 @@ jobs:
         apt-get update
         apt-get install -y git wget curl bc bison flex \
           build-essential libssl-dev libelf-dev \
-          libncurses5-dev python3 python \
+          libncurses-dev python3 python3-pip \
           gcc-aarch64-linux-gnu \
           binutils-aarch64-linux-gnu \
           cpio rsync ca-certificates gnupg
@@ -50,35 +50,26 @@ jobs:
           scripts/dtc/dtc-lexer.lex.c_shipped 2>/dev/null || true
         sed -i 's/(desc && desc->action && desc->action->name) ?/(0) ?/g' \
           kernel/irq/irqdesc.c
-        echo "Basic fixes applied"
 
-    - name: Add Include Paths
-      shell: python3 {0}
-      run: |
-        import os, subprocess
+        # --- Specific include fixes (proven working) ---
+        sed -i '1i ccflags-y += -I$(srctree)/drivers/devfreq' \
+          drivers/devfreq/Makefile
+        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/cm_mgr_v1' \
+          drivers/misc/mediatek/base/power/cm_mgr_v1/Makefile
+        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/mt6771' \
+          drivers/misc/mediatek/base/power/mt6771/Makefile
+        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/ppm_v3/src/mach/mt6771' \
+          drivers/misc/mediatek/base/power/ppm_v3/src/mach/mt6771/Makefile
+        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/spm_v4' \
+          drivers/misc/mediatek/base/power/spm_v4/Makefile
+        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/swpm_v1/mt6771' \
+          drivers/misc/mediatek/base/power/swpm_v1/mt6771/Makefile
+        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/cameraisp/src/isp_50' \
+          drivers/misc/mediatek/cameraisp/src/isp_50/Makefile
+        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/ccu/src/mt6771' \
+          drivers/misc/mediatek/ccu/src/mt6771/Makefile
 
-        os.chdir('kernel-source')
-
-        result = subprocess.run(
-            ['find', 'drivers/misc/mediatek', '-type', 'd', '-maxdepth', '6'],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True
-        )
-        mtk_dirs = [d for d in result.stdout.strip().split('\n')
-                    if d and os.path.isdir(d)]
-
-        extra_dirs = [
-            'drivers/devfreq',
-            'drivers/clk/mediatek',
-            'drivers/gpu/mediatek',
-        ]
-        all_dirs = sorted(set(mtk_dirs + [d for d in extra_dirs if os.path.isdir(d)]))
-
-        lines = ['KBUILD_CPPFLAGS += -I$(srctree)/' + d for d in all_dirs]
-        with open('Makefile', 'a') as f:
-            f.write('\n# Auto include paths for MTK headers\n')
-            f.write('\n'.join(lines) + '\n')
-
-        print('Added ' + str(len(lines)) + ' include paths to Makefile')
+        echo "Build fixes applied"
 
     - name: Patch CPU OPP
       shell: python3 {0}
@@ -124,6 +115,7 @@ jobs:
         cd kernel-source
         make ARCH=arm64 \
              CROSS_COMPILE=aarch64-linux-gnu- \
+             MTK_PLATFORM=mt6771 \
              walton_defconfig
 
     - name: Build Kernel
@@ -133,6 +125,7 @@ jobs:
         set -o pipefail
         make ARCH=arm64 \
              CROSS_COMPILE=aarch64-linux-gnu- \
+             MTK_PLATFORM=mt6771 \
              HOSTCFLAGS="-fcommon" \
              -j$(nproc) Image.gz 2>&1 | tee build.log
         BUILD_RESULT=${PIPESTATUS[0]}
