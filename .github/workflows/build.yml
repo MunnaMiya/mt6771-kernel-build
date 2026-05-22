@@ -1,4 +1,4 @@
-name: Inspect imgsensor common structure
+name: Inspect missing sensor directories
 
 on:
   workflow_dispatch:
@@ -14,16 +14,36 @@ jobs:
       run: apt-get update && apt-get install -y git
 
     - name: Clone Nokia MT6771 Kernel
-      run: git clone --depth=1 https://github.com/nokia-dev/android_kernel_nokia_mt6771.git kernel-source
+      run: git clone --depth=1 https://github.com/nokia-dev/android_kernel_nokia_mt6771.git nokia-kernel
 
-    - name: Show common directory tree (2 levels)
-      run: |
-        cd kernel-source
-        echo "=== common/ tree (depth 2) ==="
-        find drivers/misc/mediatek/imgsensor/src/common -maxdepth 2 -type d 2>/dev/null || echo "no common dir"
+    - name: Clone Realme 3 Kernel (reference)
+      run: git clone --depth=1 https://github.com/realme-kernel-opensource/Realme3-kernel-source.git realme-kernel
 
-    - name: Show mt6771 Makefile
+    - name: Inspect sensor directories in both kernels
       run: |
-        cd kernel-source
-        echo "=== mt6771/Makefile ==="
-        cat drivers/misc/mediatek/imgsensor/src/mt6771/Makefile
+        echo "=== Nokia kernel sensor contents ==="
+        for sensor in s5k3l6_mipi_raw s5k5e9yx_mipi_raw s5k4h7yx_mipi_raw; do
+          dir="nokia-kernel/drivers/misc/mediatek/imgsensor/src/common/v1_1/$sensor"
+          echo ""
+          echo "Sensor: $sensor"
+          if [ -d "$dir" ]; then
+            echo "Directory exists. Contents:"
+            ls -la "$dir"
+          else
+            echo "DIRECTORY MISSING"
+          fi
+        done
+
+        echo ""
+        echo "=== Realme kernel sensor contents ==="
+        for sensor in s5k3l6_mipi_raw s5k5e9yx_mipi_raw s5k4h7yx_mipi_raw; do
+          dir="realme-kernel/drivers/misc/mediatek/imgsensor/src/common/v1_1/$sensor"
+          echo ""
+          echo "Sensor: $sensor"
+          if [ -d "$dir" ]; then
+            echo "Directory exists. Contents:"
+            ls -la "$dir"
+          else
+            echo "DIRECTORY MISSING"
+          fi
+        done
