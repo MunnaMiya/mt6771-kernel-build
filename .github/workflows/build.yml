@@ -1,9 +1,11 @@
-name: Inspect cmdq Makefiles
+name: Build MT6771 Kernel OC
 on:
   workflow_dispatch:
+  push:
+    branches: [ main ]
 
 jobs:
-  inspect:
+  build:
     runs-on: ubuntu-latest
     container:
       image: ubuntu:18.04
@@ -12,25 +14,142 @@ jobs:
     - name: Install Dependencies
       run: |
         apt-get update
-        apt-get install -y git
+        apt-get install -y git wget curl bc bison flex \
+          build-essential libssl-dev libelf-dev \
+          libncurses5-dev python3 python \
+          gcc-aarch64-linux-gnu \
+          binutils-aarch64-linux-gnu \
+          cpio rsync ca-certificates gnupg
 
-    - name: Clone Kernel
+    - name: Get kernel_config from repo
+      env:
+        TOKEN: ${{ github.token }}
       run: |
-        git clone --depth=1 https://github.com/nokia-dev/android_kernel_nokia_mt6771.git kernel-source
+        git clone --depth=1 \
+          https://x-access-token:${TOKEN}@github.com/${{ github.repository }}.git \
+          myrepo
+        cp myrepo/kernel_config.txt ./kernel_config.txt
+        echo "kernel_config.txt ready"
+        wc -l kernel_config.txt
 
-    - name: Inspect cmdq structure
+    - name: Clone Nokia MT6771 Kernel
       run: |
-        echo "=== cmdq directory tree ==="
-        find kernel-source/drivers/misc/mediatek/cmdq -type f -name "Makefile" -o -name "*.h" -o -name "*.c" | sort
-        echo ""
-        echo "=== Contents of cmdq/v3/Makefile ==="
-        cat kernel-source/drivers/misc/mediatek/cmdq/v3/Makefile 2>/dev/null || echo "NOT FOUND"
-        echo ""
-        echo "=== Contents of cmdq/v3/mt6771/Makefile ==="
-        cat kernel-source/drivers/misc/mediatek/cmdq/v3/mt6771/Makefile 2>/dev/null || echo "NOT FOUND"
-        echo ""
-        echo "=== Does cmdq_engine.h exist? ==="
-        find kernel-source/drivers/misc/mediatek/cmdq -name "cmdq_engine.h" -type f
-        echo ""
-        echo "=== What does cmdq_def.h include? ==="
-        cat kernel-source/drivers/misc/mediatek/cmdq/v3/cmdq_def.h
+        git clone --depth=1 \
+          https://github.com/nokia-dev/android_kernel_nokia_mt6771.git \
+          kernel-source
+
+    - name: Fix Build Issues
+      run: |
+        cd kernel-source
+        # Remove -Werror
+        find . -type f \( -name "Makefile" -o -name "Kbuild" \) \
+          -exec sed -i 's/-Werror//g' {} + 2>/dev/null || true
+        # Remove implicit-function-declaration flag
+        grep -rl "implicit-function-declaration" . 2>/dev/null | while read f; do
+          sed -i '/implicit-function-declaration/d' "$f"
+          echo "  Fixed: $f"
+        done
+        # Fix dtc lexer
+        sed -i '/^YYLTYPE yylloc;/s/^/extern /' \
+          scripts/dtc/dtc-lexer.lex.c_shipped 2>/dev/null || true
+        # Fix irqdesc.c
+        sed -i 's/(desc && desc->action && desc->action->name) ?/(0) ?/g' \
+          kernel/irq/irqdesc.c
+
+        # --- Add include paths for missing headers ---
+        sed -i '1i ccflags-y += -I$(srctree)/drivers/devfreq' \
+          drivers/devfreq/Makefile
+        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/cm_mgr_v1' \
+          drivers/misc/mediatek/base/power/cm_mgr_v1/Makefile
+        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/mt6771' \
+          drivers/misc/mediatek/base/power/mt6771/Makefile
+        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/ppm_v3/src/mach/mt6771' \
+          drivers/misc/mediatek/base/power/ppm_v3/src/mach/mt6771/Makefile
+        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/spm_v4' \
+          drivers/misc/mediatek/base/power/spm_v4/Makefile
+        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/swpm_v1/mt6771' \
+          drivers/misc/mediatek/base/power/swpm_v1/mt6771/Makefile
+        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/cameraisp/src/isp_50' \
+          drivers/misc/mediatek/cameraisp/src/isp_50/Makefile
+        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/ccu/src/mt6771' \
+          drivers/misc/mediatek/ccu/src/mt6771/Makefile
+        # Force include of the mt6771 engine directory for cmdq (fixes cmdq_engine.h)
+        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/cmdq/v3/mt6771' \
+          drivers/misc/mediatek/cmdq/v3/Makefile
+
+        echo "Fixes applied"
+
+    - name: Patch CPU OPP
+      shell: python3 {0}
+      run: |
+        path = "kernel-source/drivers/misc/mediatek/base/power/cpufreq_v1/src/mach/mt6771/mtk_cpufreq_platform.c"
+        with open(path, "r") as f:
+            content = f.read()
+        old = "unsigned int _mt_cpufreq_get_cpu_level(void)\n{\n\tunsigned int lv = CPU_LEVEL_0;\n\tunsigned int temp = 0;\n\tunsigned int segcode = 0;\n\tunsigned int bincode = 0;\n\tunsigned int turbocode = 0;\n\tunsigned int a_code = 0;"
+        new = "unsigned int _mt_cpufreq_get_cpu_level(void)\n{\n\tturbo_flag = 0;\n\treturn CPU_LEVEL_0;\n\tunsigned int lv = CPU_LEVEL_0;\n\tunsigned int temp = 0;\n\tunsigned int segcode = 0;\n\tunsigned int bincode = 0;\n\tunsigned int turbocode = 0;\n\tunsigned int a_code = 0;"
+        if old in content:
+            content = content.replace(old, new)
+            print("CPU patch OK")
+        else:
+            print("CPU patch NOT found")
+        with open(path, "w") as f:
+            f.write(content)
+
+    - name: Patch GPU Segment
+      shell: python3 {0}
+      run: |
+        path = "kernel-source/drivers/misc/mediatek/base/power/mt6771/mtk_gpufreq_core.c"
+        with open(path, "r") as f:
+            content = f.read()
+        old = "\tif (g_efuse_speed_bound_id == 0x03000000) {\n\t\t/* 900MHz Version */\n\t\tg_segment_id = MT6771_SEGMENT_1;\n\t} else if (g_efuse_speed_bound_id == 0x05000000) {\n\t\t/* 800MHz Version */\n\t\tg_segment_id = MT6771_SEGMENT_2;\n\t} else if (g_efuse_speed_bound_id == 0x07000000) {\n\t\t/* 700MHz Version */\n\t\tg_segment_id = MT6771_SEGMENT_3;\n\t} else if (g_efuse_speed_bound_id == 0x02000000 && g_efuse_turbo_id == 0x00000008) {\n\t\t/* 900MHz Version */\n\t\tg_segment_id = MT6771_SEGMENT_4;\n\t} else {\n\t\t/* Other Version, set default segment */\n\t\tg_segment_id = MT6771_SEGMENT_2;\n\t}"
+        new = "\t/* OC patch: force Segment 1 = 900MHz GPU */\n\tg_segment_id = MT6771_SEGMENT_1;"
+        if old in content:
+            content = content.replace(old, new)
+            print("GPU patch OK")
+        else:
+            print("GPU patch NOT found")
+        with open(path, "w") as f:
+            f.write(content)
+
+    - name: Copy Kernel Config
+      run: |
+        cp kernel_config.txt \
+          kernel-source/arch/arm64/configs/walton_defconfig
+        echo "Config copied"
+        wc -l kernel-source/arch/arm64/configs/walton_defconfig
+
+    - name: Configure Kernel
+      run: |
+        cd kernel-source
+        make ARCH=arm64 \
+             CROSS_COMPILE=aarch64-linux-gnu- \
+             walton_defconfig
+
+    - name: Build Kernel
+      shell: bash
+      run: |
+        cd kernel-source
+        set -o pipefail
+        make ARCH=arm64 \
+             CROSS_COMPILE=aarch64-linux-gnu- \
+             HOSTCFLAGS="-fcommon" \
+             -j$(nproc) Image.gz 2>&1 | tee build.log
+        BUILD_RESULT=${PIPESTATUS[0]}
+        echo "Exit code: $BUILD_RESULT"
+        if [ -f arch/arm64/boot/Image.gz ]; then
+          echo "SUCCESS"
+          ls -lh arch/arm64/boot/Image.gz
+        else
+          echo "FAILED"
+          grep "error:" build.log | grep -v "warning:" | tail -20
+          exit 1
+        fi
+
+    - name: Upload Kernel
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: kernel-oc
+        path: |
+          kernel-source/arch/arm64/boot/Image.gz
+          kernel-source/build.log
