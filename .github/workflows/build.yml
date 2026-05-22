@@ -59,13 +59,13 @@ jobs:
         sed -i 's/(desc && desc->action && desc->action->name) ?/(0) ?/g' \
           kernel/irq/irqdesc.c
 
-        # Auto‑include every directory under drivers/misc/mediatek (and a few extras)
+        # Auto‑include every directory under drivers/misc/mediatek (Python 3.6 safe)
         python3 -c "
 import os, subprocess
 
 result = subprocess.run(
     ['find', 'drivers/misc/mediatek', '-type', 'd', '-maxdepth', 6],
-    capture_output=True, text=True
+    stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True
 )
 mtk_dirs = [d for d in result.stdout.strip().split('\n') if d and os.path.isdir(d)]
 
@@ -78,10 +78,10 @@ all_dirs = sorted(set(mtk_dirs + [d for d in extra_dirs if os.path.isdir(d)]))
 
 lines = [f'KBUILD_CPPFLAGS += -I\$(srctree)/{d}' for d in all_dirs]
 with open('Makefile', 'a') as f:
-    f.write('\n# Auto include paths for missing MTK headers\n')
+    f.write('\n# Auto include paths for MTK headers\n')
     f.write('\n'.join(lines) + '\n')
 
-print(f'Added {len(lines)} include paths to top‑level Makefile')
+print(f'Added {len(lines)} include paths to top-level Makefile')
 "
         echo "All fixes applied"
 
@@ -154,10 +154,8 @@ print(f'Added {len(lines)} include paths to top‑level Makefile')
         fi
 
     - name: Upload Kernel
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v3
       if: always()
-      # Run on the host runner to avoid the Ubuntu 18.04 GLIBC limitation
-      container: ''
       with:
         name: kernel-oc
         path: |
