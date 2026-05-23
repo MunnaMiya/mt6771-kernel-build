@@ -77,8 +77,8 @@ jobs:
       run: |
         cd kernel-source
 
-        # Patch s5k3l6 project header: add missing struct member
-        SENSOR_H1="drivers/misc/mediatek/imgsensor/src/mt6771/camera_project/PDA/s5k3l6_mipi_raw/s5k3l6mipiraw_Sensor.h"
+        # Patch the COMMON s5k3l6 header (the one actually used during build)
+        SENSOR_H1="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw/s5k3l6mipiraw_Sensor.h"
         if [ -f "$SENSOR_H1" ]; then
           sed -i '/} imgsensor_struct;/i\    kal_uint8 current_ae_effective_frame;' "$SENSOR_H1"
           echo "Patched $SENSOR_H1"
@@ -86,8 +86,8 @@ jobs:
           echo "WARNING: $SENSOR_H1 not found"
         fi
 
-        # Patch s5k5e9yx project header: add same member
-        SENSOR_H2="drivers/misc/mediatek/imgsensor/src/mt6771/camera_project/PDA/s5k5e9yx_mipi_raw/s5k5e9yxmipiraw_Sensor.h"
+        # Patch the COMMON s5k5e9yx header
+        SENSOR_H2="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9yx_mipi_raw/s5k5e9mipiraw_Sensor.h"
         if [ -f "$SENSOR_H2" ]; then
           sed -i '/} imgsensor_struct;/i\    kal_uint8 current_ae_effective_frame;' "$SENSOR_H2"
           echo "Patched $SENSOR_H2"
