@@ -1,4 +1,4 @@
-name: Inspect missing sensor directories
+name: Inspect realme-mt6771-devs kernel for imgsensor drivers
 
 on:
   workflow_dispatch:
@@ -13,37 +13,20 @@ jobs:
     - name: Install git
       run: apt-get update && apt-get install -y git
 
-    - name: Clone Nokia MT6771 Kernel
-      run: git clone --depth=1 https://github.com/nokia-dev/android_kernel_nokia_mt6771.git nokia-kernel
-
-    - name: Clone Realme 3 Kernel (reference)
-      run: git clone --depth=1 https://github.com/realme-kernel-opensource/Realme3-kernel-source.git realme-kernel
-
-    - name: Inspect sensor directories in both kernels
+    - name: Clone realme-mt6771-devs kernel (shallow)
       run: |
-        echo "=== Nokia kernel sensor contents ==="
-        for sensor in s5k3l6_mipi_raw s5k5e9yx_mipi_raw s5k4h7yx_mipi_raw; do
-          dir="nokia-kernel/drivers/misc/mediatek/imgsensor/src/common/v1_1/$sensor"
-          echo ""
-          echo "Sensor: $sensor"
-          if [ -d "$dir" ]; then
-            echo "Directory exists. Contents:"
-            ls -la "$dir"
-          else
-            echo "DIRECTORY MISSING"
-          fi
-        done
+        git clone --depth=1 --branch android-13.0 \
+          https://github.com/realme-mt6771-devs/android_kernel_realme_mt6771.git \
+          realme-mt6771-kernel
 
+    - name: Inspect missing sensor directories
+      run: |
+        cd realme-mt6771-kernel
+        echo "=== Checking s5k3l6_mipi_raw ==="
+        ls -la drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw/
         echo ""
-        echo "=== Realme kernel sensor contents ==="
-        for sensor in s5k3l6_mipi_raw s5k5e9yx_mipi_raw s5k4h7yx_mipi_raw; do
-          dir="realme-kernel/drivers/misc/mediatek/imgsensor/src/common/v1_1/$sensor"
-          echo ""
-          echo "Sensor: $sensor"
-          if [ -d "$dir" ]; then
-            echo "Directory exists. Contents:"
-            ls -la "$dir"
-          else
-            echo "DIRECTORY MISSING"
-          fi
-        done
+        echo "=== Checking s5k5e9yx_mipi_raw ==="
+        ls -la drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9_mipi_raw/
+        echo ""
+        echo "=== Checking s5k4h7_mipi_raw ==="
+        ls -la drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7_mipi_raw/
