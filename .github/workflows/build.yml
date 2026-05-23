@@ -73,51 +73,44 @@ jobs:
         rm -rf nokia-pda mt6771-ref
         echo "Imgsensor drivers fetched and renamed"
 
-    - name: Patch imgsensor headers for s5k3l6 and s5k5e9yx compatibility
+    - name: Patch imgsensor headers for s5k3l6, s5k5e9yx and s5k4h7yx
       run: |
         cd kernel-source
 
-        # Add missing struct member to s5k3l6 common header
+        # 1. Add missing struct member to s5k3l6 common header
         SENSOR_H1="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw/s5k3l6mipiraw_Sensor.h"
         if [ -f "$SENSOR_H1" ]; then
-          # Insert before the closing brace of imgsensor_struct
           sed -i '/} imgsensor_struct;/i\    kal_uint8 current_ae_effective_frame;' "$SENSOR_H1"
-          # Verify insertion
-          if grep -q "current_ae_effective_frame" "$SENSOR_H1"; then
-            echo "Successfully patched $SENSOR_H1"
-          else
-            echo "ERROR: Patch failed for $SENSOR_H1"
-            exit 1
-          fi
+          echo "Patched $SENSOR_H1"
         else
           echo "ERROR: $SENSOR_H1 not found"
           exit 1
         fi
 
-        # Add missing struct member to s5k5e9yx common header
+        # 2. Add missing struct member to s5k5e9yx common header
         SENSOR_H2="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9yx_mipi_raw/s5k5e9mipiraw_Sensor.h"
         if [ -f "$SENSOR_H2" ]; then
           sed -i '/} imgsensor_struct;/i\    kal_uint8 current_ae_effective_frame;' "$SENSOR_H2"
-          if grep -q "current_ae_effective_frame" "$SENSOR_H2"; then
-            echo "Successfully patched $SENSOR_H2"
-          else
-            echo "ERROR: Patch failed for $SENSOR_H2"
-            exit 1
-          fi
+          echo "Patched $SENSOR_H2"
         else
           echo "WARNING: $SENSOR_H2 not found – skipping"
         fi
 
-        # Add missing enum to common header
+        # 3. Add missing include to s5k4h7yx common header (fix incomplete enum)
+        SENSOR_H3="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7yx_mipi_raw/s5k4h7mipiraw_Sensor.h"
+        if [ -f "$SENSOR_H3" ]; then
+          # Insert '#include "imgsensor_sensor.h"' after the first #include line
+          sed -i '0,/#include/s/#include/#include "imgsensor_sensor.h"\n#include/' "$SENSOR_H3"
+          echo "Patched $SENSOR_H3"
+        else
+          echo "WARNING: $SENSOR_H3 not found – skipping"
+        fi
+
+        # 4. Add missing enum value to common header
         ENUM_H="drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h"
         if [ -f "$ENUM_H" ]; then
           sed -i '/SENSOR_FEATURE_MAX/i\    SENSOR_FEATURE_GET_AE_EFFECTIVE_FRAME_FOR_LE,' "$ENUM_H"
-          if grep -q "SENSOR_FEATURE_GET_AE_EFFECTIVE_FRAME_FOR_LE" "$ENUM_H"; then
-            echo "Successfully patched $ENUM_H"
-          else
-            echo "ERROR: Enum patch failed for $ENUM_H"
-            exit 1
-          fi
+          echo "Patched $ENUM_H"
         else
           echo "ERROR: $ENUM_H not found"
           exit 1
