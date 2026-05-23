@@ -1,4 +1,4 @@
-name: Inspect realme imgsensor header definitions (exact lines)
+name: Inspect both Nokia kernels for imgsensor definitions
 
 on:
   workflow_dispatch:
@@ -13,27 +13,36 @@ jobs:
     - name: Install git
       run: apt-get update && apt-get install -y git
 
-    - name: Clone realme-mt6771-devs kernel
-      run: |
-        git clone --depth=1 --branch android-13.0 \
-          https://github.com/realme-mt6771-devs/android_kernel_realme_mt6771.git \
-          realme-kernel
+    - name: Clone main Nokia MT6771 kernel
+      run: git clone --depth=1 https://github.com/nokia-dev/android_kernel_nokia_mt6771.git main-nokia
 
-    - name: Show the enum definition for SENSOR_FEATURE_GET_AE_EFFECTIVE_FRAME_FOR_LE
-      run: |
-        cd realme-kernel
-        echo "=== Context around the enum value ==="
-        grep -n -B5 -A5 "SENSOR_FEATURE_GET_AE_EFFECTIVE_FRAME_FOR_LE" drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h
+    - name: Clone Nokia 5.1 Plus kernel
+      run: git clone --depth=1 https://github.com/greenorb007/android_kernel_nokia_PDA.git pda-nokia
 
-    - name: Show the struct definition context (imgsensor_struct)
+    - name: Find imgsensor_struct definition in main Nokia
       run: |
-        cd realme-kernel
-        echo "=== Context around current_ae_effective_frame in the s5k3l6 header ==="
-        grep -n -B5 -A5 "current_ae_effective_frame" drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw/s5k3l6mipiraw_Sensor.h
+        cd main-nokia
+        echo "=== Main Nokia: imgsensor_struct definition ==="
+        grep -rn "} imgsensor_struct;" --include="*.h" drivers/misc/mediatek/imgsensor/
+        echo ""
+        echo "=== Main Nokia: SENSOR_FEATURE enum near end ==="
+        grep -n "SENSOR_FEATURE_" drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h | tail -10
 
-    - name: Also check the Nokia kernel's kd_imgsensor_define.h for existing enum
+    - name: Find imgsensor_struct definition in PDA Nokia
       run: |
-        echo "=== Checking Nokia kernel (if present) ==="
-        if [ -d "nokia-kernel" ]; then
-          grep -n "SENSOR_FEATURE_GET_AE_EFFECTIVE_FRAME_FOR_LE" nokia-kernel/drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h || echo "Not found in Nokia"
+        cd pda-nokia
+        echo "=== PDA Nokia: imgsensor_struct definition ==="
+        grep -rn "} imgsensor_struct;" --include="*.h" drivers/misc/mediatek/imgsensor/
+        echo ""
+        echo "=== PDA Nokia: SENSOR_FEATURE enum near end ==="
+        grep -n "SENSOR_FEATURE_" drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h | tail -10
+
+    - name: Show the actual struct content around the closing brace in main Nokia
+      run: |
+        cd main-nokia
+        FILE=$(grep -rl "} imgsensor_struct;" --include="*.h" drivers/misc/mediatek/imgsensor/ | head -1)
+        if [ -n "$FILE" ]; then
+          LINE=$(grep -n "} imgsensor_struct;" "$FILE" | head -1 | cut -d: -f1)
+          echo "=== $FILE : lines $((LINE-10)) to $LINE ==="
+          sed -n "$((LINE-10)),${LINE}p" "$FILE"
         fi
