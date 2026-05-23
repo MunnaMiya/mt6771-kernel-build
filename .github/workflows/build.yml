@@ -1,4 +1,4 @@
-name: Inspect realme imgsensor headers for missing definitions
+name: Inspect realme imgsensor header definitions (exact lines)
 
 on:
   workflow_dispatch:
@@ -19,14 +19,21 @@ jobs:
           https://github.com/realme-mt6771-devs/android_kernel_realme_mt6771.git \
           realme-kernel
 
-    - name: Find current_ae_effective_frame definition
+    - name: Show the enum definition for SENSOR_FEATURE_GET_AE_EFFECTIVE_FRAME_FOR_LE
       run: |
         cd realme-kernel
-        echo "=== current_ae_effective_frame in imgsensor_struct ==="
-        grep -n -r "current_ae_effective_frame" --include="*.h" drivers/misc/mediatek/imgsensor/
+        echo "=== Context around the enum value ==="
+        grep -n -B5 -A5 "SENSOR_FEATURE_GET_AE_EFFECTIVE_FRAME_FOR_LE" drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h
 
-    - name: Find SENSOR_FEATURE_GET_AE_EFFECTIVE_FRAME_FOR_LE definition
+    - name: Show the struct definition context (imgsensor_struct)
       run: |
         cd realme-kernel
-        echo "=== SENSOR_FEATURE_GET_AE_EFFECTIVE_FRAME_FOR_LE ==="
-        grep -n -r "SENSOR_FEATURE_GET_AE_EFFECTIVE_FRAME_FOR_LE" --include="*.h" drivers/misc/mediatek/imgsensor/
+        echo "=== Context around current_ae_effective_frame in the s5k3l6 header ==="
+        grep -n -B5 -A5 "current_ae_effective_frame" drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw/s5k3l6mipiraw_Sensor.h
+
+    - name: Also check the Nokia kernel's kd_imgsensor_define.h for existing enum
+      run: |
+        echo "=== Checking Nokia kernel (if present) ==="
+        if [ -d "nokia-kernel" ]; then
+          grep -n "SENSOR_FEATURE_GET_AE_EFFECTIVE_FRAME_FOR_LE" nokia-kernel/drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h || echo "Not found in Nokia"
+        fi
