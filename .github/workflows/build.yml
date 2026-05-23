@@ -1,23 +1,172 @@
-name: Inspect MSDK_SCENARIO_ID_ENUM definition
-
+name: Build MT6771 Kernel OC
 on:
   workflow_dispatch:
+  push:
+    branches: [ main ]
 
 jobs:
-  inspect:
+  build:
     runs-on: ubuntu-latest
     container:
       image: ubuntu:20.04
+    env:
+      MTK_PLATFORM: mt6771
 
     steps:
-    - name: Install git
-      run: apt-get update && apt-get install -y git
-
-    - name: Clone main Nokia kernel
-      run: git clone --depth=1 https://github.com/nokia-dev/android_kernel_nokia_mt6771.git main-nokia
-
-    - name: Find MSDK_SCENARIO_ID_ENUM definition
+    - name: Install Dependencies
       run: |
-        cd main-nokia
-        echo "=== Where is MSDK_SCENARIO_ID_ENUM defined? ==="
-        grep -rn "MSDK_SCENARIO_ID_ENUM" --include="*.h" drivers/misc/mediatek/imgsensor/
+        apt-get update
+        apt-get install -y git wget curl bc bison flex \
+          build-essential libssl-dev libelf-dev \
+          libncurses-dev python3 python3-pip \
+          gcc-aarch64-linux-gnu \
+          binutils-aarch64-linux-gnu \
+          cpio rsync ca-certificates gnupg
+
+    - name: Get kernel_config from repo
+      env:
+        TOKEN: ${{ github.token }}
+      run: |
+        git clone --depth=1 \
+          https://x-access-token:${TOKEN}@github.com/${{ github.repository }}.git \
+          myrepo
+        cp myrepo/kernel_config.txt ./kernel_config.txt
+        echo "kernel_config.txt ready"
+
+    - name: Clone Nokia MT6771 Kernel
+      run: |
+        git clone --depth=1 \
+          https://github.com/nokia-dev/android_kernel_nokia_mt6771.git \
+          kernel-source
+
+    - name: Fetch missing Mali r14p0 driver from Realme 3 kernel
+      run: |
+        git clone --depth=1 \
+          https://github.com/realme-kernel-opensource/Realme3-kernel-source.git \
+          realme-kernel
+        cp -r realme-kernel/drivers/misc/mediatek/gpu/gpu_mali/mali_bifrost/mali-r14p0 \
+             kernel-source/drivers/misc/mediatek/gpu/gpu_mali/mali_bifrost/
+        rm -rf realme-kernel
+        echo "Mali r14p0 driver copied from Realme 3 kernel"
+
+    - name: Fetch missing imgsensor drivers and fix naming
+      run: |
+        git clone --depth=1 \
+          https://github.com/greenorb007/android_kernel_nokia_PDA.git \
+          nokia-pda
+        git clone --depth=1 --branch android-13.0 \
+          https://github.com/realme-mt6771-devs/android_kernel_realme_mt6771.git \
+          mt6771-ref
+        cp -r nokia-pda/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7_mipi_raw \
+             kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7yx_mipi_raw
+        cp -r mt6771-ref/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw \
+             kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/
+        cp -r mt6771-ref/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9_mipi_raw \
+             kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9yx_mipi_raw
+        rm -rf nokia-pda mt6771-ref
+        echo "Imgsensor drivers fetched and renamed"
+
+    - name: Patch imgsensor headers
+      run: |
+        cd kernel-source
+        # 1. Add missing struct member to s5k3l6 common header
+        SENSOR_H1="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw/s5k3l6mipiraw_Sensor.h"
+        if [ -f "$SENSOR_H1" ]; then
+          sed -i '/} imgsensor_struct;/i\    kal_uint8 current_ae_effective_frame;' "$SENSOR_H1"
+          echo "Patched $SENSOR_H1"
+        else
+          echo "ERROR: $SENSOR_H1 not found"; exit 1
+        fi
+        # 2. Add missing struct member to s5k5e9yx common header
+        SENSOR_H2="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9yx_mipi_raw/s5k5e9mipiraw_Sensor.h"
+        if [ -f "$SENSOR_H2" ]; then
+          sed -i '/} imgsensor_struct;/i\    kal_uint8 current_ae_effective_frame;' "$SENSOR_H2"
+          echo "Patched $SENSOR_H2"
+        else
+          echo "WARNING: $SENSOR_H2 not found – skipping"
+        fi
+        # 3. Fix s5k4h7: add include for enum definition
+        SENSOR_H3="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7yx_mipi_raw/s5k4h7mipiraw_Sensor.h"
+        if [ -f "$SENSOR_H3" ]; then
+          sed -i '1i #include "kd_imgsensor_define.h"' "$SENSOR_H3"
+          echo "Added kd_imgsensor_define.h include to $SENSOR_H3"
+        else
+          echo "ERROR: $SENSOR_H3 not found"; exit 1
+        fi
+        # 4. Add missing enum value to common header
+        ENUM_H="drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h"
+        if [ -f "$ENUM_H" ]; then
+          sed -i '/SENSOR_FEATURE_MAX/i\    SENSOR_FEATURE_GET_AE_EFFECTIVE_FRAME_FOR_LE,' "$ENUM_H"
+          echo "Patched $ENUM_H"
+        else
+          echo "ERROR: $ENUM_H not found"; exit 1
+        fi
+
+    - name: Fix Build Issues (includes Oppo header removal and path additions)
+      run: |
+        cd kernel-source
+        # ---- Remove Oppo dependency ----
+        python3 -c "
+        import glob, re
+        pattern = re.compile(r'^.*#include\s*<\s*soc/oppo/oppo_project\.h\s*>.*$')
+        for f in glob.glob('drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw/s5k3l6mipiraw_Sensor.c') + \
+                 glob.glob('drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9yx_mipi_raw/s5k5e9mipiraw_Sensor.c'):
+            with open(f, 'r') as file:
+                lines = file.readlines()
+            new_lines = [line for line in lines if not pattern.match(line)]
+            with open(f, 'w') as file:
+                file.writelines(new_lines)
+            print(f'Cleaned: {f}')
+        "
+        mkdir -p include/soc/oppo
+        touch include/soc/oppo/oppo_project.h
+
+        # Standard fixes
+        find . -type f \( -name "Makefile" -o -name "Kbuild" \) \
+          -exec sed -i 's/-Werror//g' {} + 2>/dev/null || true
+        grep -rl "implicit-function-declaration" . 2>/dev/null | while read f; do
+          sed -i '/implicit-function-declaration/d' "$f"
+        done
+        sed -i '/^YYLTYPE yylloc;/s/^/extern /' \
+          scripts/dtc/dtc-lexer.lex.c_shipped 2>/dev/null || true
+        sed -i 's/(desc && desc->action && desc->action->name) ?/(0) ?/g' \
+          kernel/irq/irqdesc.c
+
+        # ---- AUTO‑INCLUDE ----
+        python3 -c "
+        import os, glob
+        for makefile in glob.glob('drivers/misc/mediatek/**/Makefile', recursive=True):
+            dir = os.path.dirname(makefile)
+            line = f'ccflags-y += -I\$(srctree)/{dir}\n'
+            with open(makefile, 'r+') as f:
+                content = f.read()
+                if line.strip() not in content:
+                    f.seek(0, 0)
+                    f.write(line + content)
+        "
+
+        # ---- Specific cross‑directory includes (ADDED imgsensor/inc) ----
+        for d in \
+          'drivers/devfreq' \
+          'drivers/clk/mediatek' \
+          'drivers/misc/mediatek/eccci/mt6771' \
+          'drivers/misc/mediatek/base/power/cm_mgr_v1' \
+          'drivers/misc/mediatek/base/power/mt6771' \
+          'drivers/misc/mediatek/base/power/ppm_v3/src/mach/mt6771' \
+          'drivers/misc/mediatek/base/power/spm_v4' \
+          'drivers/misc/mediatek/base/power/swpm_v1/mt6771' \
+          'drivers/misc/mediatek/cameraisp/src/isp_50' \
+          'drivers/misc/mediatek/ccu/src/mt6771' \
+          'drivers/misc/mediatek/imgsensor/inc'; do
+          sed -i "1i ccflags-y += -I\$(srctree)/$d" $d/Makefile 2>/dev/null || true
+        done
+
+        # ---- FIX for modem_sys.h ----
+        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci' \
+          drivers/misc/mediatek/eccci/mt6771/Makefile 2>/dev/null || true
+        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci' \
+          drivers/misc/mediatek/eccci/Makefile 2>/dev/null || true
+
+        echo "All build fixes applied"
+
+    # ... (rest of the steps: Patch CPU, Patch GPU, Copy Config, Configure, Build, Upload) ...
