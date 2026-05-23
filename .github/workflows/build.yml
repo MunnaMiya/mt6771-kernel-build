@@ -49,21 +49,31 @@ jobs:
         rm -rf realme-kernel
         echo "Mali r14p0 driver copied from Realme 3 kernel"
 
-    - name: Fetch missing imgsensor drivers from realme-mt6771-devs kernel
+    - name: Fetch missing imgsensor drivers and remove Oppo dependency
       run: |
+        # Clone reference source (only to extract sensor sources)
         git clone --depth=1 --branch android-13.0 \
           https://github.com/realme-mt6771-devs/android_kernel_realme_mt6771.git \
           mt6771-ref
-        # Copy sensors that match exactly
+
+        # Copy sensor directories
         cp -r mt6771-ref/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw \
              kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/
         cp -r mt6771-ref/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7_mipi_raw \
              kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/
-        # The s5k5e9yx sensor: source is named without "yx", copy and rename directory
         cp -r mt6771-ref/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9_mipi_raw \
              kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9yx_mipi_raw
+
+        # Remove Oppo-specific includes from s5k3l6 driver (make it Nokia-compatible)
+        SENSOR_FILE="kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw/s5k3l6mipiraw_Sensor.c"
+        # Delete the Oppo include line
+        sed -i '/#include <soc\/oppo\/oppo_project.h>/d' "$SENSOR_FILE"
+        # Remove any lines that reference oppo_project functions (if any)
+        sed -i '/get_oppo_project()/d' "$SENSOR_FILE"
+        sed -i '/oppo_project/d' "$SENSOR_FILE"
+
         rm -rf mt6771-ref
-        echo "Imgsensor drivers copied (s5k5e9yx matched by directory rename)"
+        echo "Imgsensor drivers copied and cleaned of Oppo dependencies"
 
     - name: Fix Build Issues
       run: |
