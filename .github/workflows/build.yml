@@ -108,7 +108,7 @@ jobs:
           echo "WARNING: $SENSOR_H2 not found – skipping"
         fi
 
-        # 3. s5k4h7yx: replace incomplete enum with int
+        # 3. s5k4h7yx: replace incomplete enum with int in .h file
         SENSOR_H3="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7yx_mipi_raw/s5k4h7mipiraw_Sensor.h"
         if [ -f "$SENSOR_H3" ]; then
           sed -i 's/enum MSDK_SCENARIO_ID_ENUM current_scenario_id;.*/int current_scenario_id; \/* was enum MSDK_SCENARIO_ID_ENUM *\//' "$SENSOR_H3"
@@ -117,11 +117,18 @@ jobs:
           echo "ERROR: $SENSOR_H3 not found"; exit 1
         fi
 
-        # 4. Add missing enum value to common header
+        # 4. Add ALL missing enum values to common header at once
         ENUM_H="drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h"
         if [ -f "$ENUM_H" ]; then
-          sed -i '/SENSOR_FEATURE_MAX/i\    SENSOR_FEATURE_GET_AE_EFFECTIVE_FRAME_FOR_LE,' "$ENUM_H"
-          echo "Patched $ENUM_H"
+          # Remove any previous patch attempts to prevent duplicates
+          sed -i '/SENSOR_FEATURE_GET_AE_EFFECTIVE_FRAME_FOR_LE/d' "$ENUM_H"
+          sed -i '/SENSOR_FEATURE_GET_PERIOD_BY_SCENARIO/d' "$ENUM_H"
+          sed -i '/SENSOR_FEATURE_GET_PIXEL_CLOCK_FREQ_BY_SCENARIO/d' "$ENUM_H"
+          sed -i '/SENSOR_FEATURE_SET_AS_SECURE_DRIVER/d' "$ENUM_H"
+          
+          # Insert all missing enums before SENSOR_FEATURE_MAX
+          sed -i '/SENSOR_FEATURE_MAX/i\    SENSOR_FEATURE_GET_AE_EFFECTIVE_FRAME_FOR_LE,\n    SENSOR_FEATURE_GET_PERIOD_BY_SCENARIO,\n    SENSOR_FEATURE_GET_PIXEL_CLOCK_FREQ_BY_SCENARIO,\n    SENSOR_FEATURE_SET_AS_SECURE_DRIVER,' "$ENUM_H"
+          echo "Patched $ENUM_H with all missing enums"
         else
           echo "ERROR: $ENUM_H not found"; exit 1
         fi
@@ -129,13 +136,27 @@ jobs:
         # 5. Add missing S5K4H7_SENSOR_ID after S5K4H7YX_SENSOR_ID
         KD_H="drivers/misc/mediatek/imgsensor/inc/kd_imgsensor.h"
         if [ -f "$KD_H" ]; then
-          sed -i '/^#define S5K4H7YX_SENSOR_ID/a #define S5K4H7_SENSOR_ID 0x487B' "$KD_H"
-          echo "Added S5K4H7_SENSOR_ID after S5K4H7YX_SENSOR_ID in $KD_H"
+          if ! grep -q "S5K4H7_SENSOR_ID" "$KD_H"; then
+            sed -i '/^#define S5K4H7YX_SENSOR_ID/a #define S5K4H7_SENSOR_ID 0x487B' "$KD_H"
+            echo "Added S5K4H7_SENSOR_ID to $KD_H"
+          fi
         else
           echo "WARNING: $KD_H not found"
         fi
 
-        # 6. Ensure imgsensor/inc is in include path
+        # 6. Fix s5k4h7 .c file: Include missing struct definitions and fix enum mismatch
+        SENSOR_C="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7yx_mipi_raw/s5k4h7mipiraw_Sensor.c"
+        if [ -f "$SENSOR_C" ]; then
+          # Add the header that defines SENSOR_WINSIZE_INFO_STRUCT and SENSOR_FUNCTION_STRUCT
+          sed -i '1i #include "kd_imgsensor.h"' "$SENSOR_C"
+          # Replace the enum in function arguments so it matches the .h file change
+          sed -i 's/enum MSDK_SCENARIO_ID_ENUM/int/g' "$SENSOR_C"
+          echo "Patched $SENSOR_C with struct includes and enum fix"
+        else
+          echo "ERROR: $SENSOR_C not found"; exit 1
+        fi
+
+        # 7. Ensure imgsensor/inc is in include path
         MT6771_MAKE="drivers/misc/mediatek/imgsensor/src/mt6771/Makefile"
         if [ -f "$MT6771_MAKE" ]; then
           if ! grep -q 'I$(srctree)/drivers/misc/mediatek/imgsensor/inc' "$MT6771_MAKE"; then
