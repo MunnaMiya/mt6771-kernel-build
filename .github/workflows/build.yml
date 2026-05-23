@@ -126,21 +126,25 @@ jobs:
           echo "ERROR: $ENUM_H not found"; exit 1
         fi
 
-        # 5. Add missing S5K4H7_SENSOR_ID using Python (bullet‑proof)
+        # 5. Add missing S5K4H7_SENSOR_ID using a temporary Python script
         KD_H="drivers/misc/mediatek/imgsensor/inc/kd_imgsensor.h"
         if [ -f "$KD_H" ]; then
-          python3 -c "
-            with open('$KD_H', 'r') as f:
-                lines = f.readlines()
-            new_lines = []
-            for line in lines:
-                new_lines.append(line)
-                if line.startswith('#define S5K4H7YX_SENSOR_ID'):
-                    new_lines.append('#define S5K4H7_SENSOR_ID 0x487B\n')
-            with open('$KD_H', 'w') as f:
-                f.writelines(new_lines)
-            print('Inserted S5K4H7_SENSOR_ID after S5K4H7YX_SENSOR_ID')
-          "
+          cat > /tmp/insert_id.py << 'PYEOF'
+import sys
+path = sys.argv[1]
+with open(path, 'r') as f:
+    lines = f.readlines()
+new_lines = []
+for line in lines:
+    new_lines.append(line)
+    if line.startswith('#define S5K4H7YX_SENSOR_ID'):
+        new_lines.append('#define S5K4H7_SENSOR_ID 0x487B\n')
+with open(path, 'w') as f:
+    f.writelines(new_lines)
+print('Inserted S5K4H7_SENSOR_ID after S5K4H7YX_SENSOR_ID')
+PYEOF
+          python3 /tmp/insert_id.py "$KD_H"
+          rm /tmp/insert_id.py
         else
           echo "WARNING: $KD_H not found"
         fi
