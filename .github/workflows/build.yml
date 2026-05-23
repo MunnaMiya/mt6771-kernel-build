@@ -49,7 +49,7 @@ jobs:
         rm -rf realme-kernel
         echo "Mali r14p0 driver copied from Realme 3 kernel"
 
-    - name: Fetch missing imgsensor drivers and fix naming
+    - name: Fetch missing imgsensor drivers, fix naming, and copy missing header
       run: |
         git clone --depth=1 \
           https://github.com/greenorb007/android_kernel_nokia_PDA.git \
@@ -57,20 +57,34 @@ jobs:
         git clone --depth=1 --branch android-13.0 \
           https://github.com/realme-mt6771-devs/android_kernel_realme_mt6771.git \
           mt6771-ref
+
+        # Copy s5k4h7 from Nokia PDA kernel (rename to match config)
         cp -r nokia-pda/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7_mipi_raw \
              kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7yx_mipi_raw
+        # Copy s5k3l6 and s5k5e9 from realme reference
         cp -r mt6771-ref/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw \
              kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/
         cp -r mt6771-ref/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9_mipi_raw \
              kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9yx_mipi_raw
+
+        # --- Fix missing imgsensor_ca.h required by s5k4h7 ---
+        FOUND_H=$(find nokia-pda/drivers/misc/mediatek/imgsensor/ -name "imgsensor_ca.h" | head -n 1)
+        if [ -n "$FOUND_H" ]; then
+          cp "$FOUND_H" kernel-source/drivers/misc/mediatek/imgsensor/inc/imgsensor_ca.h
+          echo "Copied missing imgsensor_ca.h from Nokia PDA kernel"
+        else
+          echo "WARNING: imgsensor_ca.h not found in Nokia PDA kernel, creating stub"
+          touch kernel-source/drivers/misc/mediatek/imgsensor/inc/imgsensor_ca.h
+        fi
+
         rm -rf nokia-pda mt6771-ref
-        echo "Imgsensor drivers fetched and renamed"
+        echo "Imgsensor drivers and headers fetched"
 
     - name: Patch imgsensor headers – fix incomplete type and missing members
       run: |
         cd kernel-source
 
-        # --- s5k3l6: add missing struct member ---
+        # 1. s5k3l6: add missing struct member
         SENSOR_H1="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw/s5k3l6mipiraw_Sensor.h"
         if [ -f "$SENSOR_H1" ]; then
           sed -i '/} imgsensor_struct;/i\    kal_uint8 current_ae_effective_frame;' "$SENSOR_H1"
@@ -79,7 +93,7 @@ jobs:
           echo "ERROR: $SENSOR_H1 not found"; exit 1
         fi
 
-        # --- s5k5e9yx: add missing struct member ---
+        # 2. s5k5e9yx: add missing struct member
         SENSOR_H2="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9yx_mipi_raw/s5k5e9mipiraw_Sensor.h"
         if [ -f "$SENSOR_H2" ]; then
           sed -i '/} imgsensor_struct;/i\    kal_uint8 current_ae_effective_frame;' "$SENSOR_H2"
@@ -88,7 +102,7 @@ jobs:
           echo "WARNING: $SENSOR_H2 not found – skipping"
         fi
 
-        # --- s5k4h7yx: replace incomplete enum with int ---
+        # 3. s5k4h7yx: replace incomplete enum with int (avoids dependency)
         SENSOR_H3="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7yx_mipi_raw/s5k4h7mipiraw_Sensor.h"
         if [ -f "$SENSOR_H3" ]; then
           sed -i 's/enum MSDK_SCENARIO_ID_ENUM current_scenario_id;/int current_scenario_id; \/* was enum MSDK_SCENARIO_ID_ENUM *\//' "$SENSOR_H3"
@@ -97,7 +111,7 @@ jobs:
           echo "ERROR: $SENSOR_H3 not found"; exit 1
         fi
 
-        # --- Add missing enum value to common header ---
+        # 4. Add missing enum value to common header
         ENUM_H="drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h"
         if [ -f "$ENUM_H" ]; then
           sed -i '/SENSOR_FEATURE_MAX/i\    SENSOR_FEATURE_GET_AE_EFFECTIVE_FRAME_FOR_LE,' "$ENUM_H"
@@ -106,7 +120,7 @@ jobs:
           echo "ERROR: $ENUM_H not found"; exit 1
         fi
 
-        # --- Ensure imgsensor/inc is in include path (belt & braces) ---
+        # 5. Ensure imgsensor/inc is in include path (belt & braces)
         MT6771_MAKE="drivers/misc/mediatek/imgsensor/src/mt6771/Makefile"
         if [ -f "$MT6771_MAKE" ]; then
           if ! grep -q 'I$(srctree)/drivers/misc/mediatek/imgsensor/inc' "$MT6771_MAKE"; then
@@ -118,7 +132,7 @@ jobs:
     - name: Fix Build Issues (includes Oppo header removal and path additions)
       run: |
         cd kernel-source
-        # ---- Remove Oppo dependency ----
+        # ---- Remove Oppo dependency from s5k3l6 & s5k5e9yx ----
         python3 -c "
         import glob, re
         pattern = re.compile(r'^.*#include\s*<\s*soc/oppo/oppo_project\.h\s*>.*$')
@@ -145,7 +159,7 @@ jobs:
         sed -i 's/(desc && desc->action && desc->action->name) ?/(0) ?/g' \
           kernel/irq/irqdesc.c
 
-        # ---- AUTO‑INCLUDE ----
+        # ---- AUTO‑INCLUDE: every mediatek Makefile gets its own directory ----
         python3 -c "
         import os, glob
         for makefile in glob.glob('drivers/misc/mediatek/**/Makefile', recursive=True):
