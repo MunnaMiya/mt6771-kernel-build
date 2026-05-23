@@ -126,25 +126,11 @@ jobs:
           echo "ERROR: $ENUM_H not found"; exit 1
         fi
 
-        # 5. Add missing S5K4H7_SENSOR_ID using a temporary Python script
+        # 5. Add missing S5K4H7_SENSOR_ID after S5K4H7YX_SENSOR_ID
         KD_H="drivers/misc/mediatek/imgsensor/inc/kd_imgsensor.h"
         if [ -f "$KD_H" ]; then
-          cat > /tmp/insert_id.py << 'PYEOF'
-import sys
-path = sys.argv[1]
-with open(path, 'r') as f:
-    lines = f.readlines()
-new_lines = []
-for line in lines:
-    new_lines.append(line)
-    if line.startswith('#define S5K4H7YX_SENSOR_ID'):
-        new_lines.append('#define S5K4H7_SENSOR_ID 0x487B\n')
-with open(path, 'w') as f:
-    f.writelines(new_lines)
-print('Inserted S5K4H7_SENSOR_ID after S5K4H7YX_SENSOR_ID')
-PYEOF
-          python3 /tmp/insert_id.py "$KD_H"
-          rm /tmp/insert_id.py
+          sed -i '/^#define S5K4H7YX_SENSOR_ID/a #define S5K4H7_SENSOR_ID 0x487B' "$KD_H"
+          echo "Added S5K4H7_SENSOR_ID after S5K4H7YX_SENSOR_ID in $KD_H"
         else
           echo "WARNING: $KD_H not found"
         fi
