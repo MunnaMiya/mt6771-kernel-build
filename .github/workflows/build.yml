@@ -44,10 +44,8 @@ jobs:
         git clone --depth=1 \
           https://github.com/realme-kernel-opensource/Realme3-kernel-source.git \
           realme-kernel
-        # Copy the entire mali-r14p0 directory (contains mt6771 platform)
         cp -r realme-kernel/drivers/misc/mediatek/gpu/gpu_mali/mali_bifrost/mali-r14p0 \
              kernel-source/drivers/misc/mediatek/gpu/gpu_mali/mali_bifrost/
-        # Remove the clone to free space
         rm -rf realme-kernel
         echo "Mali r14p0 driver copied from Realme 3 kernel"
 
@@ -56,13 +54,16 @@ jobs:
         git clone --depth=1 --branch android-13.0 \
           https://github.com/realme-mt6771-devs/android_kernel_realme_mt6771.git \
           mt6771-ref
-        # Copy the three missing sensor directories (v1_1)
-        for sensor in s5k3l6_mipi_raw s5k5e9yx_mipi_raw s5k4h7_mipi_raw; do
-          cp -r mt6771-ref/drivers/misc/mediatek/imgsensor/src/common/v1_1/$sensor \
-               kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/
-        done
+        # Copy sensors that match exactly
+        cp -r mt6771-ref/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw \
+             kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/
+        cp -r mt6771-ref/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7_mipi_raw \
+             kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/
+        # The s5k5e9yx sensor: source is named without "yx", copy and rename directory
+        cp -r mt6771-ref/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9_mipi_raw \
+             kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9yx_mipi_raw
         rm -rf mt6771-ref
-        echo "Imgsensor drivers copied from realme-mt6771-devs kernel"
+        echo "Imgsensor drivers copied (s5k5e9yx matched by directory rename)"
 
     - name: Fix Build Issues
       run: |
