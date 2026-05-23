@@ -49,49 +49,54 @@ jobs:
         rm -rf realme-kernel
         echo "Mali r14p0 driver copied from Realme 3 kernel"
 
-    - name: Fetch missing imgsensor drivers and clean Oppo code
+    - name: Fetch missing imgsensor drivers
       run: |
-        # Clone Nokia 5.1 Plus kernel (MT6771) for s5k4h7
+        # Nokia 5.1 Plus kernel for clean s5k4h7
         git clone --depth=1 \
           https://github.com/greenorb007/android_kernel_nokia_PDA.git \
           nokia-pda
-
-        # Clone realme-mt6771-devs kernel for the other two sensors
+        # realme-mt6771-devs kernel for the other two sensors
         git clone --depth=1 --branch android-13.0 \
           https://github.com/realme-mt6771-devs/android_kernel_realme_mt6771.git \
           mt6771-ref
 
-        # Copy s5k4h7 from Nokia PDA kernel (clean, no Oppo code)
+        # Copy s5k4h7 from Nokia PDA (clean)
         cp -r nokia-pda/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7_mipi_raw \
              kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/
 
-        # Copy s5k3l6 and s5k5e9 from realme reference (will clean Oppo below)
+        # Copy s5k3l6 and s5k5e9 from realme reference (will strip Oppo later)
         cp -r mt6771-ref/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw \
              kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/
         cp -r mt6771-ref/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9_mipi_raw \
              kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9yx_mipi_raw
 
-        # Remove Oppo-specific code from s5k3l6 driver
-        SENSOR_FILE="kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw/s5k3l6mipiraw_Sensor.c"
-        sed -i '/#include <soc\/oppo\/oppo_project.h>/d' "$SENSOR_FILE"
-        sed -i '/get_oppo_project()/d' "$SENSOR_FILE"
-        sed -i '/oppo_project/d' "$SENSOR_FILE"
-
-        # Remove any similar Oppo dependencies from s5k5e9 if present
-        SENSOR_FILE2="kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9yx_mipi_raw/s5k5e9mipiraw_Sensor.c"
-        if [ -f "$SENSOR_FILE2" ]; then
-          sed -i '/#include <soc\/oppo\/oppo_project.h>/d' "$SENSOR_FILE2"
-          sed -i '/get_oppo_project()/d' "$SENSOR_FILE2"
-          sed -i '/oppo_project/d' "$SENSOR_FILE2"
-        fi
-
-        # Clean up clones
         rm -rf nokia-pda mt6771-ref
-        echo "Imgsensor drivers fetched and cleaned"
+        echo "Imgsensor drivers fetched"
 
-    - name: Fix Build Issues
+    - name: Fix Build Issues (includes Oppo header removal)
       run: |
         cd kernel-source
+
+        # ---- Remove any Oppo dependency from the copied sensors ----
+        # Use Python to cleanly remove the offending include line
+        python3 -c "
+        import glob, re
+        pattern = re.compile(r'^.*#include\s*<\s*soc/oppo/oppo_project\.h\s*>.*$')
+        for f in glob.glob('drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw/s5k3l6mipiraw_Sensor.c') + \
+                 glob.glob('drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9yx_mipi_raw/s5k5e9mipiraw_Sensor.c'):
+            with open(f, 'r') as file:
+                lines = file.readlines()
+            new_lines = [line for line in lines if not pattern.match(line)]
+            with open(f, 'w') as file:
+                file.writelines(new_lines)
+            print(f'Cleaned: {f}')
+        "
+
+        # ---- Create stub header as ultimate fallback ----
+        mkdir -p include/soc/oppo
+        touch include/soc/oppo/oppo_project.h
+
+        # Standard fix: remove -Werror, implicit-function-declaration, etc.
         find . -type f \( -name "Makefile" -o -name "Kbuild" \) \
           -exec sed -i 's/-Werror//g' {} + 2>/dev/null || true
         grep -rl "implicit-function-declaration" . 2>/dev/null | while read f; do
