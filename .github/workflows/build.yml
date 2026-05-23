@@ -88,18 +88,11 @@ jobs:
           echo "WARNING: $SENSOR_H2 not found – skipping"
         fi
 
-        # 3. Fix s5k4h7: add include for enum definition USING A TEMP PYTHON SCRIPT
+        # 3. Fix s5k4h7: add include for enum definition
         SENSOR_H3="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7yx_mipi_raw/s5k4h7mipiraw_Sensor.h"
         if [ -f "$SENSOR_H3" ]; then
-          cat > /tmp/fix_header.py << 'EOF'
-import sys
-path = sys.argv[1]
-with open(path, 'r') as f:
-    content = f.read()
-with open(path, 'w') as f:
-    f.write('#include "kd_imgsensor_define.h"\n' + content)
-EOF
-          python3 /tmp/fix_header.py "$SENSOR_H3"
+          printf '#include "kd_imgsensor_define.h"\n' | cat - "$SENSOR_H3" > /tmp/tmp_sensor_h
+          mv /tmp/tmp_sensor_h "$SENSOR_H3"
           echo "Added kd_imgsensor_define.h include to $SENSOR_H3"
         else
           echo "ERROR: $SENSOR_H3 not found"; exit 1
