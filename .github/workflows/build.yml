@@ -49,7 +49,7 @@ jobs:
         rm -rf realme-kernel
         echo "Mali r14p0 driver copied from Realme 3 kernel"
 
-    - name: Fetch missing imgsensor drivers
+    - name: Fetch missing imgsensor drivers and fix naming
       run: |
         # Nokia 5.1 Plus kernel for clean s5k4h7
         git clone --depth=1 \
@@ -60,9 +60,9 @@ jobs:
           https://github.com/realme-mt6771-devs/android_kernel_realme_mt6771.git \
           mt6771-ref
 
-        # Copy s5k4h7 from Nokia PDA (clean)
+        # Copy s5k4h7 from Nokia PDA and RENAME to match config (s5k4h7yx_mipi_raw)
         cp -r nokia-pda/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7_mipi_raw \
-             kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/
+             kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7yx_mipi_raw
 
         # Copy s5k3l6 and s5k5e9 from realme reference
         cp -r mt6771-ref/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw \
@@ -71,37 +71,56 @@ jobs:
              kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9yx_mipi_raw
 
         rm -rf nokia-pda mt6771-ref
-        echo "Imgsensor drivers fetched"
+        echo "Imgsensor drivers fetched and renamed"
 
     - name: Patch imgsensor headers for s5k3l6 and s5k5e9yx compatibility
       run: |
         cd kernel-source
 
-        # Patch the COMMON s5k3l6 header (the one actually used during build)
+        # Add missing struct member to s5k3l6 common header
         SENSOR_H1="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw/s5k3l6mipiraw_Sensor.h"
         if [ -f "$SENSOR_H1" ]; then
+          # Insert before the closing brace of imgsensor_struct
           sed -i '/} imgsensor_struct;/i\    kal_uint8 current_ae_effective_frame;' "$SENSOR_H1"
-          echo "Patched $SENSOR_H1"
+          # Verify insertion
+          if grep -q "current_ae_effective_frame" "$SENSOR_H1"; then
+            echo "Successfully patched $SENSOR_H1"
+          else
+            echo "ERROR: Patch failed for $SENSOR_H1"
+            exit 1
+          fi
         else
-          echo "WARNING: $SENSOR_H1 not found"
+          echo "ERROR: $SENSOR_H1 not found"
+          exit 1
         fi
 
-        # Patch the COMMON s5k5e9yx header
+        # Add missing struct member to s5k5e9yx common header
         SENSOR_H2="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9yx_mipi_raw/s5k5e9mipiraw_Sensor.h"
         if [ -f "$SENSOR_H2" ]; then
           sed -i '/} imgsensor_struct;/i\    kal_uint8 current_ae_effective_frame;' "$SENSOR_H2"
-          echo "Patched $SENSOR_H2"
+          if grep -q "current_ae_effective_frame" "$SENSOR_H2"; then
+            echo "Successfully patched $SENSOR_H2"
+          else
+            echo "ERROR: Patch failed for $SENSOR_H2"
+            exit 1
+          fi
         else
-          echo "WARNING: $SENSOR_H2 not found"
+          echo "WARNING: $SENSOR_H2 not found – skipping"
         fi
 
-        # Add missing enum value to common header
+        # Add missing enum to common header
         ENUM_H="drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h"
         if [ -f "$ENUM_H" ]; then
           sed -i '/SENSOR_FEATURE_MAX/i\    SENSOR_FEATURE_GET_AE_EFFECTIVE_FRAME_FOR_LE,' "$ENUM_H"
-          echo "Patched $ENUM_H"
+          if grep -q "SENSOR_FEATURE_GET_AE_EFFECTIVE_FRAME_FOR_LE" "$ENUM_H"; then
+            echo "Successfully patched $ENUM_H"
+          else
+            echo "ERROR: Enum patch failed for $ENUM_H"
+            exit 1
+          fi
         else
-          echo "WARNING: $ENUM_H not found"
+          echo "ERROR: $ENUM_H not found"
+          exit 1
         fi
 
     - name: Fix Build Issues (includes Oppo header removal)
