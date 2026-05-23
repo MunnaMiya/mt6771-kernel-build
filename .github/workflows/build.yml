@@ -66,11 +66,11 @@ jobs:
         rm -rf nokia-pda mt6771-ref
         echo "Imgsensor drivers fetched and renamed"
 
-    - name: Patch imgsensor headers and add include path
+    - name: Patch imgsensor headers – fix incomplete type and missing members
       run: |
         cd kernel-source
 
-        # 1. Add missing struct member to s5k3l6 common header
+        # --- s5k3l6: add missing struct member ---
         SENSOR_H1="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw/s5k3l6mipiraw_Sensor.h"
         if [ -f "$SENSOR_H1" ]; then
           sed -i '/} imgsensor_struct;/i\    kal_uint8 current_ae_effective_frame;' "$SENSOR_H1"
@@ -79,7 +79,7 @@ jobs:
           echo "ERROR: $SENSOR_H1 not found"; exit 1
         fi
 
-        # 2. Add missing struct member to s5k5e9yx common header
+        # --- s5k5e9yx: add missing struct member ---
         SENSOR_H2="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9yx_mipi_raw/s5k5e9mipiraw_Sensor.h"
         if [ -f "$SENSOR_H2" ]; then
           sed -i '/} imgsensor_struct;/i\    kal_uint8 current_ae_effective_frame;' "$SENSOR_H2"
@@ -88,17 +88,16 @@ jobs:
           echo "WARNING: $SENSOR_H2 not found – skipping"
         fi
 
-        # 3. Fix s5k4h7: add include for enum definition
+        # --- s5k4h7yx: replace incomplete enum with int ---
         SENSOR_H3="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7yx_mipi_raw/s5k4h7mipiraw_Sensor.h"
         if [ -f "$SENSOR_H3" ]; then
-          printf '#include "kd_imgsensor_define.h"\n' | cat - "$SENSOR_H3" > /tmp/tmp_sensor_h
-          mv /tmp/tmp_sensor_h "$SENSOR_H3"
-          echo "Added kd_imgsensor_define.h include to $SENSOR_H3"
+          sed -i 's/enum MSDK_SCENARIO_ID_ENUM current_scenario_id;/int current_scenario_id; \/* was enum MSDK_SCENARIO_ID_ENUM *\//' "$SENSOR_H3"
+          echo "Fixed enum in $SENSOR_H3"
         else
           echo "ERROR: $SENSOR_H3 not found"; exit 1
         fi
 
-        # 4. Add missing enum value to common header
+        # --- Add missing enum value to common header ---
         ENUM_H="drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h"
         if [ -f "$ENUM_H" ]; then
           sed -i '/SENSOR_FEATURE_MAX/i\    SENSOR_FEATURE_GET_AE_EFFECTIVE_FRAME_FOR_LE,' "$ENUM_H"
@@ -107,7 +106,7 @@ jobs:
           echo "ERROR: $ENUM_H not found"; exit 1
         fi
 
-        # 5. Ensure the imgsensor/inc directory is in the include path for the mt6771 Makefile
+        # --- Ensure imgsensor/inc is in include path (belt & braces) ---
         MT6771_MAKE="drivers/misc/mediatek/imgsensor/src/mt6771/Makefile"
         if [ -f "$MT6771_MAKE" ]; then
           if ! grep -q 'I$(srctree)/drivers/misc/mediatek/imgsensor/inc' "$MT6771_MAKE"; then
