@@ -143,15 +143,22 @@ jobs:
           echo "ERROR: $SENSOR_C not found"; exit 1
         fi
 
-        # 6. Fix common imgsensor_sensor.h: include kd_imgsensor_define.h at the very top
-        COMMON_H="drivers/misc/mediatek/imgsensor/src/common/v1_1/imgsensor_sensor.h"
-        if [ -f "$COMMON_H" ]; then
-          # Insert the include as the first line (after any comments)
-          sed -i '1i #include "kd_imgsensor_define.h"' "$COMMON_H"
-          echo "Added include to $COMMON_H"
-        else
-          echo "WARNING: $COMMON_H not found"
-        fi
+        # 6. Fix imgsensor_sensor.h and imgsensor_sensor_list.h – prepend include
+        for header in "drivers/misc/mediatek/imgsensor/src/common/v1_1/imgsensor_sensor.h" \
+                      "drivers/misc/mediatek/imgsensor/src/common/v1_1/imgsensor_sensor_list.h"; do
+          if [ -f "$header" ]; then
+            python3 -c "
+path = '$header'
+with open(path, 'r+') as f:
+    content = f.read()
+    f.seek(0, 0)
+    f.write('#include \"kd_imgsensor_define.h\"\n' + content)
+print('Prepended include to', path)
+"
+          else
+            echo "WARNING: $header not found"
+          fi
+        done
 
         # 7. Ensure imgsensor/inc is in include path
         MT6771_MAKE="drivers/misc/mediatek/imgsensor/src/mt6771/Makefile"
