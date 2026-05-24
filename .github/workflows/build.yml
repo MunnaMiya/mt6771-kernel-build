@@ -137,6 +137,18 @@ jobs:
           fi
         fi
 
+    - name: Inspect – verify patches
+      run: |
+        cd kernel-source
+        echo "=== imgsensor_sensor.h first lines ==="
+        head -5 drivers/misc/mediatek/imgsensor/src/common/v1_1/imgsensor_sensor.h
+        echo ""
+        echo "=== Does kd_imgsensor_define.h exist in common/v1_1? ==="
+        ls -l drivers/misc/mediatek/imgsensor/src/common/v1_1/kd_imgsensor_define.h
+        echo ""
+        echo "=== grep for SENSOR_FUNCTION_STRUCT in that file ==="
+        grep -n "SENSOR_FUNCTION_STRUCT" drivers/misc/mediatek/imgsensor/src/common/v1_1/kd_imgsensor_define.h | head -5
+
     - name: Fix Build Issues (Oppo removal, include paths, etc.)
       run: |
         cd kernel-source
