@@ -143,15 +143,12 @@ jobs:
           echo "ERROR: $SENSOR_C not found"; exit 1
         fi
 
-        # 6. Fix common imgsensor_sensor.h: include kd_imgsensor_define.h for SENSOR_FUNCTION_STRUCT
+        # 6. Fix common imgsensor_sensor.h: include kd_imgsensor_define.h at the very top
         COMMON_H="drivers/misc/mediatek/imgsensor/src/common/v1_1/imgsensor_sensor.h"
         if [ -f "$COMMON_H" ]; then
-          if ! grep -q 'kd_imgsensor_define.h' "$COMMON_H"; then
-            sed -i '1i #include "kd_imgsensor_define.h"' "$COMMON_H"
-            echo "Added include to $COMMON_H"
-          else
-            echo "Include already present in $COMMON_H"
-          fi
+          # Insert the include as the first line (after any comments)
+          sed -i '1i #include "kd_imgsensor_define.h"' "$COMMON_H"
+          echo "Added include to $COMMON_H"
         else
           echo "WARNING: $COMMON_H not found"
         fi
