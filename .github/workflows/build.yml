@@ -143,11 +143,10 @@ jobs:
           echo "WARNING: $KD_H not found"
         fi
 
-        # 6. Add the missing SENSOR_WINSIZE_INFO_STRUCT definition (Python, no YAML issues)
+        # 6. Add SENSOR_WINSIZE_INFO_STRUCT before the final #endif
         if [ -f "$ENUM_H" ]; then
-          python3 -c "
+          cat > /tmp/insert_struct.py << 'PYEOF'
 import sys
-path = '$ENUM_H'
 definition = '''struct SENSOR_WINSIZE_INFO_STRUCT {
     MUINT32 full_w;
     MUINT32 full_h;
@@ -161,19 +160,21 @@ definition = '''struct SENSOR_WINSIZE_INFO_STRUCT {
     MUINT32 y_remosaic;
 };
 '''
-with open(path, 'r') as f:
+with open(sys.argv[1], 'r') as f:
     lines = f.readlines()
 new = []
 for l in lines:
     if l.startswith('#endif'):
         new.append(definition + '\n')
     new.append(l)
-with open(path, 'w') as f:
+with open(sys.argv[1], 'w') as f:
     f.writelines(new)
 print('Inserted SENSOR_WINSIZE_INFO_STRUCT')
-"
+PYEOF
+          python3 /tmp/insert_struct.py "$ENUM_H"
+          rm /tmp/insert_struct.py
         else
-          echo "ERROR: $ENUM_H not found"
+          echo "ERROR: $ENUM_H not found"; exit 1
         fi
 
         # 7. Fix s5k4h7 .c file: Include missing struct definitions and fix enum mismatch
