@@ -63,7 +63,11 @@ jobs:
         cp -r nokia-pda/drivers/misc/mediatek/imgsensor/src/common/v1_1 \
              kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1
 
-        # Copy the three missing sensor directories from realme reference
+        # Rename s5k4h7_mipi_raw to s5k4h7yx_mipi_raw (config expects the 'yx' suffix)
+        mv kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7_mipi_raw \
+           kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7yx_mipi_raw
+
+        # Copy the two missing sensor directories from realme reference
         cp -r mt6771-ref/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw \
              kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/
         cp -r mt6771-ref/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9_mipi_raw \
@@ -74,7 +78,7 @@ jobs:
         [ -n "$FOUND_CMD" ] && cp "$FOUND_CMD" kernel-source/drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_CA_TA_cmd.h || touch kernel-source/drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_CA_TA_cmd.h
 
         rm -rf nokia-pda mt6771-ref
-        echo "Imgsensor common/v1_1 replaced with PDA version, sensors added"
+        echo "Imgsensor common/v1_1 replaced with PDA version, sensors added and renamed"
 
     - name: Patch imgsensor headers – fix incomplete type, missing members, and add includes
       run: |
