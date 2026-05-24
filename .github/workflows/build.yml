@@ -1,4 +1,4 @@
-name: Inspect PDA kernel imgsensor_sensor.h for SENSOR_FUNCTION_STRUCT inclusion
+name: Inspect patched imgsensor_sensor.h
 
 on:
   workflow_dispatch:
@@ -13,18 +13,24 @@ jobs:
     - name: Install git
       run: apt-get update && apt-get install -y git
 
-    - name: Clone Nokia PDA kernel
-      run: |
-        git clone --depth=1 \
-          https://github.com/greenorb007/android_kernel_nokia_PDA.git \
-          nokia-pda
+    - name: Clone main Nokia kernel
+      run: git clone --depth=1 https://github.com/nokia-dev/android_kernel_nokia_mt6771.git kernel-source
 
-    - name: Show top of imgsensor_sensor.h and search for SENSOR_FUNCTION_STRUCT
+    - name: Simulate the fetching and patching steps
       run: |
-        cd nokia-pda
-        FILE="drivers/misc/mediatek/imgsensor/src/common/v1_1/imgsensor_sensor.h"
-        echo "=== First 20 lines of $FILE ==="
-        head -20 "$FILE"
-        echo ""
-        echo "=== Lines referencing SENSOR_FUNCTION_STRUCT ==="
-        grep -n "SENSOR_FUNCTION_STRUCT" "$FILE"
+        cd kernel-source
+        # Fetch PDA kernel for the header
+        git clone --depth=1 https://github.com/greenorb007/android_kernel_nokia_PDA.git nokia-pda
+        # Copy kd_imgsensor_define.h to both places
+        cp nokia-pda/drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h \
+           drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h
+        cp nokia-pda/drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h \
+           drivers/misc/mediatek/imgsensor/src/common/v1_1/kd_imgsensor_define.h
+        # Add include line to imgsensor_sensor.h
+        sed -i '1i #include "kd_imgsensor_define.h"' \
+          drivers/misc/mediatek/imgsensor/src/common/v1_1/imgsensor_sensor.h
+        rm -rf nokia-pda
+
+    - name: Show top of modified imgsensor_sensor.h
+      run: |
+        head -10 kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/imgsensor_sensor.h
