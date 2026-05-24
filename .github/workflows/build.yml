@@ -96,60 +96,37 @@ jobs:
           echo "Patched $SENSOR_H2"
         fi
 
-        # 3. Fix s5k4h7yx: replace incomplete enum with int in both .h and .c
+        # 3. Fix s5k4h7yx: replace incomplete enum with int in .h file
         SENSOR_H3="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7yx_mipi_raw/s5k4h7mipiraw_Sensor.h"
         if [ -f "$SENSOR_H3" ]; then
           sed -i 's/enum MSDK_SCENARIO_ID_ENUM current_scenario_id;.*/int current_scenario_id; \/* was enum MSDK_SCENARIO_ID_ENUM *\//' "$SENSOR_H3"
           echo "Fixed enum in $SENSOR_H3"
         fi
 
+        # 4. Fix s5k4h7 .c file: add includes, fix enum, and insert SENSOR_WINSIZE_INFO_STRUCT
         SENSOR_C1="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7yx_mipi_raw/s5k4h7mipiraw_Sensor.c"
         if [ -f "$SENSOR_C1" ]; then
+          # Add the needed header
           sed -i '1i #include "kd_imgsensor.h"' "$SENSOR_C1"
+          # Replace enum MSDK_SCENARIO_ID_ENUM with int
           sed -i 's/enum MSDK_SCENARIO_ID_ENUM/int/g' "$SENSOR_C1"
-          echo "Patched $SENSOR_C1"
+          # Create a file with the struct definition (printf handles \n inside double quotes)
+          printf 'struct SENSOR_WINSIZE_INFO_STRUCT {\n    MUINT32 full_w;\n    MUINT32 full_h;\n    MUINT32 x0_offset;\n    MUINT32 y0_offset;\n    MUINT32 scale_width;\n    MUINT32 scale_height;\n    MUINT32 x1_tg_offset;\n    MUINT32 y1_tg_offset;\n    MUINT32 x_remosaic;\n    MUINT32 y_remosaic;\n};\n' > /tmp/winsize.h
+          # Insert the struct after the #include "kd_imgsensor.h" line (which is now the first line)
+          sed -i '/#include "kd_imgsensor.h"/r /tmp/winsize.h' "$SENSOR_C1"
+          rm /tmp/winsize.h
+          echo "Patched $SENSOR_C1 with struct, includes, and enum fix"
+        else
+          echo "ERROR: $SENSOR_C1 not found"
+          exit 1
         fi
 
-        # 4. Add missing enum values to common header
+        # 5. Add missing enum values to common header
         ENUM_H="drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h"
         if [ -f "$ENUM_H" ]; then
           sed -i '/SENSOR_FEATURE_GET_AE_EFFECTIVE_FRAME_FOR_LE/d' "$ENUM_H"
           sed -i '/SENSOR_FEATURE_MAX/i\    SENSOR_FEATURE_GET_AE_EFFECTIVE_FRAME_FOR_LE,' "$ENUM_H"
           echo "Patched $ENUM_H with missing enum"
-        fi
-
-        # 5. Add SENSOR_WINSIZE_INFO_STRUCT using a safe Python script
-        if [ -f "$ENUM_H" ]; then
-          # Write a Python script using multiple echo commands to avoid YAML issues
-          echo "import sys" > /tmp/insert_struct.py
-          echo "path = sys.argv[1]" >> /tmp/insert_struct.py
-          echo "definition = '''struct SENSOR_WINSIZE_INFO_STRUCT {" >> /tmp/insert_struct.py
-          echo "    MUINT32 full_w;" >> /tmp/insert_struct.py
-          echo "    MUINT32 full_h;" >> /tmp/insert_struct.py
-          echo "    MUINT32 x0_offset;" >> /tmp/insert_struct.py
-          echo "    MUINT32 y0_offset;" >> /tmp/insert_struct.py
-          echo "    MUINT32 scale_width;" >> /tmp/insert_struct.py
-          echo "    MUINT32 scale_height;" >> /tmp/insert_struct.py
-          echo "    MUINT32 x1_tg_offset;" >> /tmp/insert_struct.py
-          echo "    MUINT32 y1_tg_offset;" >> /tmp/insert_struct.py
-          echo "    MUINT32 x_remosaic;" >> /tmp/insert_struct.py
-          echo "    MUINT32 y_remosaic;" >> /tmp/insert_struct.py
-          echo "};'''" >> /tmp/insert_struct.py
-          echo "" >> /tmp/insert_struct.py
-          echo "with open(path, 'r') as f:" >> /tmp/insert_struct.py
-          echo "    lines = f.readlines()" >> /tmp/insert_struct.py
-          echo "new = []" >> /tmp/insert_struct.py
-          echo "for l in lines:" >> /tmp/insert_struct.py
-          echo "    if l.startswith('#endif'):" >> /tmp/insert_struct.py
-          echo "        new.append(definition + '\n')" >> /tmp/insert_struct.py
-          echo "    new.append(l)" >> /tmp/insert_struct.py
-          echo "with open(path, 'w') as f:" >> /tmp/insert_struct.py
-          echo "    f.writelines(new)" >> /tmp/insert_struct.py
-          echo "print('Inserted SENSOR_WINSIZE_INFO_STRUCT')" >> /tmp/insert_struct.py
-
-          python3 /tmp/insert_struct.py "$ENUM_H"
-          rm /tmp/insert_struct.py
-          echo "Added SENSOR_WINSIZE_INFO_STRUCT to $ENUM_H"
         fi
 
         # 6. Add S5K4H7_SENSOR_ID to kd_imgsensor.h
