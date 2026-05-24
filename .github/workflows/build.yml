@@ -83,10 +83,15 @@ jobs:
           touch kernel-source/drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_CA_TA_cmd.h
         fi
 
+        # Replace kd_imgsensor_define.h with the PDA version (contains missing struct and enums)
+        cp nokia-pda/drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h \
+           kernel-source/drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h
+        echo "Replaced kd_imgsensor_define.h with Nokia PDA version"
+
         rm -rf nokia-pda mt6771-ref
         echo "Imgsensor drivers and headers fetched"
 
-    - name: Patch imgsensor headers – fix incomplete type, missing members, and add struct definition
+    - name: Patch imgsensor headers – fix incomplete type, missing members, and enum additions
       run: |
         cd kernel-source
 
@@ -117,10 +122,10 @@ jobs:
           echo "ERROR: $SENSOR_H3 not found"; exit 1
         fi
 
-        # 4. Add ALL missing enum values to common header at once
+        # 4. Add missing enum values to common header (ensure they exist even after replacement)
         ENUM_H="drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h"
         if [ -f "$ENUM_H" ]; then
-          # Remove any previous patch attempts
+          # Remove any previous patch attempts to prevent duplicates
           sed -i '/SENSOR_FEATURE_GET_AE_EFFECTIVE_FRAME_FOR_LE/d' "$ENUM_H"
           sed -i '/SENSOR_FEATURE_GET_PERIOD_BY_SCENARIO/d' "$ENUM_H"
           sed -i '/SENSOR_FEATURE_GET_PIXEL_CLOCK_FREQ_BY_SCENARIO/d' "$ENUM_H"
@@ -143,41 +148,7 @@ jobs:
           echo "WARNING: $KD_H not found"
         fi
 
-        # 6. Add SENSOR_WINSIZE_INFO_STRUCT before the final #endif
-        if [ -f "$ENUM_H" ]; then
-          cat > /tmp/insert_struct.py << 'PYEOF'
-import sys
-definition = '''struct SENSOR_WINSIZE_INFO_STRUCT {
-    MUINT32 full_w;
-    MUINT32 full_h;
-    MUINT32 x0_offset;
-    MUINT32 y0_offset;
-    MUINT32 scale_width;
-    MUINT32 scale_height;
-    MUINT32 x1_tg_offset;
-    MUINT32 y1_tg_offset;
-    MUINT32 x_remosaic;
-    MUINT32 y_remosaic;
-};
-'''
-with open(sys.argv[1], 'r') as f:
-    lines = f.readlines()
-new = []
-for l in lines:
-    if l.startswith('#endif'):
-        new.append(definition + '\n')
-    new.append(l)
-with open(sys.argv[1], 'w') as f:
-    f.writelines(new)
-print('Inserted SENSOR_WINSIZE_INFO_STRUCT')
-PYEOF
-          python3 /tmp/insert_struct.py "$ENUM_H"
-          rm /tmp/insert_struct.py
-        else
-          echo "ERROR: $ENUM_H not found"; exit 1
-        fi
-
-        # 7. Fix s5k4h7 .c file: Include missing struct definitions and fix enum mismatch
+        # 6. Fix s5k4h7 .c file: Include missing struct definitions and fix enum mismatch
         SENSOR_C="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7yx_mipi_raw/s5k4h7mipiraw_Sensor.c"
         if [ -f "$SENSOR_C" ]; then
           sed -i '1i #include "kd_imgsensor.h"' "$SENSOR_C"
@@ -187,7 +158,7 @@ PYEOF
           echo "ERROR: $SENSOR_C not found"; exit 1
         fi
 
-        # 8. Ensure imgsensor/inc is in include path
+        # 7. Ensure imgsensor/inc is in include path
         MT6771_MAKE="drivers/misc/mediatek/imgsensor/src/mt6771/Makefile"
         if [ -f "$MT6771_MAKE" ]; then
           if ! grep -q 'I$(srctree)/drivers/misc/mediatek/imgsensor/inc' "$MT6771_MAKE"; then
