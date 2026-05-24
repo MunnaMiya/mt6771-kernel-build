@@ -143,23 +143,37 @@ jobs:
           echo "WARNING: $KD_H not found"
         fi
 
-        # 6. Add the missing SENSOR_WINSIZE_INFO_STRUCT definition
+        # 6. Add the missing SENSOR_WINSIZE_INFO_STRUCT definition (Python, no YAML issues)
         if [ -f "$ENUM_H" ]; then
-          # Insert the struct before the final #endif
-          sed -i '/^#endif \/\* _KD_IMGSENSOR_DEFINE_H \*\/$/i\
-struct SENSOR_WINSIZE_INFO_STRUCT {\
-    MUINT32 full_w;\
-    MUINT32 full_h;\
-    MUINT32 x0_offset;\
-    MUINT32 y0_offset;\
-    MUINT32 scale_width;\
-    MUINT32 scale_height;\
-    MUINT32 x1_tg_offset;\
-    MUINT32 y1_tg_offset;\
-    MUINT32 x_remosaic;\
-    MUINT32 y_remosaic;\
-};\n' "$ENUM_H"
-          echo "Added SENSOR_WINSIZE_INFO_STRUCT to $ENUM_H"
+          python3 -c "
+import sys
+path = '$ENUM_H'
+definition = '''struct SENSOR_WINSIZE_INFO_STRUCT {
+    MUINT32 full_w;
+    MUINT32 full_h;
+    MUINT32 x0_offset;
+    MUINT32 y0_offset;
+    MUINT32 scale_width;
+    MUINT32 scale_height;
+    MUINT32 x1_tg_offset;
+    MUINT32 y1_tg_offset;
+    MUINT32 x_remosaic;
+    MUINT32 y_remosaic;
+};
+'''
+with open(path, 'r') as f:
+    lines = f.readlines()
+new = []
+for l in lines:
+    if l.startswith('#endif'):
+        new.append(definition + '\n')
+    new.append(l)
+with open(path, 'w') as f:
+    f.writelines(new)
+print('Inserted SENSOR_WINSIZE_INFO_STRUCT')
+"
+        else
+          echo "ERROR: $ENUM_H not found"
         fi
 
         # 7. Fix s5k4h7 .c file: Include missing struct definitions and fix enum mismatch
