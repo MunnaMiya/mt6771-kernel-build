@@ -136,7 +136,6 @@ jobs:
         # 6. Fix common imgsensor_sensor.h: include local copy of kd_imgsensor_define.h
         COMMON_H="drivers/misc/mediatek/imgsensor/src/common/v1_1/imgsensor_sensor.h"
         if [ -f "$COMMON_H" ]; then
-          # Insert include at first line
           sed -i '1i #include "kd_imgsensor_define.h"' "$COMMON_H"
           echo "Added include to $COMMON_H"
         else
