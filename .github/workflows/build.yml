@@ -49,7 +49,7 @@ jobs:
         rm -rf realme-kernel
         echo "Mali r14p0 driver copied from Realme 3 kernel"
 
-    - name: Fetch missing imgsensor drivers (only the sensor directories, keep original common)
+    - name: Fetch missing imgsensor drivers, replace imgsensor_sensor.h and kd_imgsensor_define.h
       run: |
         git clone --depth=1 \
           https://github.com/greenorb007/android_kernel_nokia_PDA.git \
@@ -58,64 +58,32 @@ jobs:
           https://github.com/realme-mt6771-devs/android_kernel_realme_mt6771.git \
           mt6771-ref
 
-        # Copy sensor directories into the existing common/v1_1 (do NOT replace the whole folder)
-        # s5k4h7 from Nokia PDA (rename to s5k4h7yx)
+        # Copy sensor directories
         cp -r nokia-pda/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7_mipi_raw \
              kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7yx_mipi_raw
-        # s5k3l6 and s5k5e9 from realme reference
         cp -r mt6771-ref/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw \
              kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/
         cp -r mt6771-ref/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9_mipi_raw \
              kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9yx_mipi_raw
 
-        # Copy missing kd_imgsensor_CA_TA_cmd.h and imgsensor_ca.h to inc/
+        # Replace imgsensor_sensor.h with PDA version (already includes needed headers)
+        cp nokia-pda/drivers/misc/mediatek/imgsensor/src/common/v1_1/imgsensor_sensor.h \
+           kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/imgsensor_sensor.h
+
+        # Replace kd_imgsensor_define.h with PDA version (contains SENSOR_FUNCTION_STRUCT, etc.)
+        cp nokia-pda/drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h \
+           kernel-source/drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h
+        cp nokia-pda/drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h \
+           kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/kd_imgsensor_define.h
+
+        # Copy missing kd_imgsensor_CA_TA_cmd.h and imgsensor_ca.h
         FOUND_CA=$(find nokia-pda/drivers/misc/mediatek/imgsensor/ -name "imgsensor_ca.h" | head -n 1)
         [ -n "$FOUND_CA" ] && cp "$FOUND_CA" kernel-source/drivers/misc/mediatek/imgsensor/inc/imgsensor_ca.h || touch kernel-source/drivers/misc/mediatek/imgsensor/inc/imgsensor_ca.h
-
         FOUND_CMD=$(find nokia-pda/drivers/misc/mediatek/imgsensor/ -name "kd_imgsensor_CA_TA_cmd.h" | head -n 1)
         [ -n "$FOUND_CMD" ] && cp "$FOUND_CMD" kernel-source/drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_CA_TA_cmd.h || touch kernel-source/drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_CA_TA_cmd.h
 
         rm -rf nokia-pda mt6771-ref
-        echo "Imgsensor drivers copied, original common/v1_1 preserved"
-
-    - name: Create imgsensor_fix.h and patch imgsensor_sensor.h
-      run: |
-        cd kernel-source
-
-        # Create a fixup header with forward declarations for missing types
-        cat > drivers/misc/mediatek/imgsensor/src/common/v1_1/imgsensor_fix.h << 'EOF'
-        #ifndef __IMGSENSOR_FIX_H__
-        #define __IMGSENSOR_FIX_H__
-
-        /* Forward declarations to satisfy old kernel headers */
-        struct SENSOR_FUNCTION_STRUCT;
-        typedef struct SENSOR_FUNCTION_STRUCT *PSENSOR_FUNCTION_STRUCT;
-
-        enum MSDK_SCENARIO_ID_ENUM;
-        enum ACDK_SENSOR_INFO_STRUCT;
-
-        struct SENSOR_WINSIZE_INFO_STRUCT {
-            unsigned int full_w;
-            unsigned int full_h;
-            unsigned int x0_offset;
-            unsigned int y0_offset;
-            unsigned int scale_width;
-            unsigned int scale_height;
-            unsigned int x1_tg_offset;
-            unsigned int y1_tg_offset;
-            unsigned int x_remosaic;
-            unsigned int y_remosaic;
-        };
-
-        #define SENSOR_FEATURE_GET_AE_EFFECTIVE_FRAME_FOR_LE 0xFFFF
-
-        #endif /* __IMGSENSOR_FIX_H__ */
-        EOF
-
-        # Insert the fixup header at the very top of imgsensor_sensor.h
-        sed -i '1i #include "imgsensor_fix.h"' \
-          drivers/misc/mediatek/imgsensor/src/common/v1_1/imgsensor_sensor.h
-        echo "imgsensor_fix.h created and included"
+        echo "Sensors copied, imgsensor_sensor.h and kd_imgsensor_define.h replaced with PDA versions"
 
     - name: Patch remaining sensor header issues
       run: |
@@ -232,17 +200,14 @@ jobs:
         path = "kernel-source/drivers/misc/mediatek/base/power/cpufreq_v1/src/mach/mt6771/mtk_cpufreq_platform.c"
         with open(path, "r") as f:
             content = f.read()
-
         func_start = content.find("unsigned int _mt_cpufreq_get_cpu_level(void)")
         if func_start == -1:
             print("ERROR: CPU function not found")
             exit(1)
-
         brace_start = content.find("{", func_start)
         if brace_start == -1:
             print("ERROR: opening brace not found")
             exit(1)
-
         count = 1
         pos = brace_start + 1
         while count > 0 and pos < len(content):
@@ -252,7 +217,6 @@ jobs:
                 count -= 1
             pos += 1
         func_end = pos
-
         replacement = (
             content[func_start:brace_start + 1] +
             "\n\t/* OC: Force CPU_LEVEL_0 = 1989 MHz (2.0 GHz) @ 1.000V */\n"
@@ -273,20 +237,17 @@ jobs:
         path = "kernel-source/drivers/misc/mediatek/base/power/mt6771/mtk_gpufreq_core.c"
         with open(path, "r") as f:
             content = f.read()
-
         efuse_line = "g_efuse_speed_bound_id = (readl(g_efuse_base + 0x50) & 0x0F000000);"
         start_idx = content.find(efuse_line)
         if start_idx == -1:
             print("ERROR: efuse read not found")
             exit(1)
         start_idx += len(efuse_line)
-
         log_line = 'gpufreq_pr_info("@%s: g_efuse_speed_bound_id'
         end_idx = content.find(log_line, start_idx)
         if end_idx == -1:
             print("ERROR: segment log line not found")
             exit(1)
-
         replacement = (
             "\n"
             "\t/* OC: Force Segment 1 = 900 MHz GPU @ 0.900V */\n"
