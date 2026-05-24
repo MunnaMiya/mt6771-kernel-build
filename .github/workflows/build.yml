@@ -49,7 +49,7 @@ jobs:
         rm -rf realme-kernel
         echo "Mali r14p0 driver copied from Realme 3 kernel"
 
-    - name: Fetch imgsensor drivers (Full PDA Framework Swap)
+    - name: Fetch missing imgsensor drivers and replace kd_imgsensor_define.h
       run: |
         git clone --depth=1 \
           https://github.com/greenorb007/android_kernel_nokia_PDA.git \
@@ -58,28 +58,15 @@ jobs:
           https://github.com/realme-mt6771-devs/android_kernel_realme_mt6771.git \
           mt6771-ref
 
-        # 1. DELETE the old incomplete common/v1_1 from the main X5 kernel
-        rm -rf kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1
-        
-        # 2. COPY the complete PDA common/v1_1 directory (contains all structs/enums natively)
-        cp -r nokia-pda/drivers/misc/mediatek/imgsensor/src/common/v1_1 \
-             kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1
-        
-        # 3. RENAME s5k4h7_mipi_raw to s5k4h7yx_mipi_raw to match defconfig
-        mv kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7_mipi_raw \
-           kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7yx_mipi_raw
-        
-        # 4. COPY the two Realme sensors into the new PDA v1_1 directory
+        # Keep the original common/v1_1, only add missing sensor directories
+        cp -r nokia-pda/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7_mipi_raw \
+             kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7yx_mipi_raw
         cp -r mt6771-ref/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw \
              kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/
         cp -r mt6771-ref/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9_mipi_raw \
              kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9yx_mipi_raw
-        
-        # 5. OVERWRITE the old X5 kd_imgsensor_define.h with the PDA version
-        cp nokia-pda/drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h \
-           kernel-source/drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h
-        
-        # 6. COPY missing CA/TA headers from PDA
+
+        # Copy missing helper headers from PDA kernel
         FOUND_CA=$(find nokia-pda/drivers/misc/mediatek/imgsensor/ -name "imgsensor_ca.h" | head -n 1)
         [ -n "$FOUND_CA" ] && cp "$FOUND_CA" kernel-source/drivers/misc/mediatek/imgsensor/inc/imgsensor_ca.h \
           || touch kernel-source/drivers/misc/mediatek/imgsensor/inc/imgsensor_ca.h
@@ -88,60 +75,48 @@ jobs:
         [ -n "$FOUND_CMD" ] && cp "$FOUND_CMD" kernel-source/drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_CA_TA_cmd.h \
           || touch kernel-source/drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_CA_TA_cmd.h
 
-        rm -rf nokia-pda mt6771-ref
-        echo "Imgsensor framework swapped to PDA base + Realme sensors added"
+        # Replace kd_imgsensor_define.h with the PDA version (contains all missing structs & enums)
+        cp nokia-pda/drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h \
+           kernel-source/drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h
+        echo "Replaced kd_imgsensor_define.h with PDA version"
 
-    - name: Patch imgsensor headers – Realme fixes, Oppo removal
+        rm -rf nokia-pda mt6771-ref
+        echo "Imgsensor drivers and headers updated"
+
+    - name: Apply remaining sensor patches
       run: |
         cd kernel-source
 
-        # 1. Add current_ae_effective_frame to Realme s5k3l6 header
+        # 1. s5k3l6: add missing struct member
         SENSOR_H1="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw/s5k3l6mipiraw_Sensor.h"
         if [ -f "$SENSOR_H1" ]; then
           sed -i '/} imgsensor_struct;/i\    kal_uint8 current_ae_effective_frame;' "$SENSOR_H1"
           echo "Patched $SENSOR_H1"
         fi
 
-        # 2. Add current_ae_effective_frame to Realme s5k5e9yx header
+        # 2. s5k5e9yx: add missing struct member
         SENSOR_H2="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9yx_mipi_raw/s5k5e9mipiraw_Sensor.h"
         if [ -f "$SENSOR_H2" ]; then
           sed -i '/} imgsensor_struct;/i\    kal_uint8 current_ae_effective_frame;' "$SENSOR_H2"
           echo "Patched $SENSOR_H2"
         fi
 
-        # 3. Fix s5k4h7yx: replace incomplete enum with int in .h file
+        # 3. s5k4h7yx: replace incomplete enum with int in .h file
         SENSOR_H3="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7yx_mipi_raw/s5k4h7mipiraw_Sensor.h"
         if [ -f "$SENSOR_H3" ]; then
           sed -i 's/enum MSDK_SCENARIO_ID_ENUM current_scenario_id;.*/int current_scenario_id; \/* was enum MSDK_SCENARIO_ID_ENUM *\//' "$SENSOR_H3"
           echo "Fixed enum in $SENSOR_H3"
         fi
 
-        # 4. Fix s5k4h7yx .c file: add include and replace enum (NO MORE STRUCT INJECTIONS)
-        SENSOR_C1="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7yx_mipi_raw/s5k4h7mipiraw_Sensor.c"
-        if [ -f "$SENSOR_C1" ]; then
-          grep -q '#include "kd_imgsensor.h"' "$SENSOR_C1" || sed -i '1i #include "kd_imgsensor.h"' "$SENSOR_C1"
-          sed -i 's/enum MSDK_SCENARIO_ID_ENUM/int/g' "$SENSOR_C1"
-          echo "Patched $SENSOR_C1 with includes and enum fix"
+        # 4. Fix s5k4h7 .c file: add include and fix enum mismatch (no struct insertion)
+        SENSOR_C="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7yx_mipi_raw/s5k4h7mipiraw_Sensor.c"
+        if [ -f "$SENSOR_C" ]; then
+          sed -i '1i #include "kd_imgsensor.h"' "$SENSOR_C"
+          sed -i 's/enum MSDK_SCENARIO_ID_ENUM/int/g' "$SENSOR_C"
+          echo "Patched $SENSOR_C"
         fi
 
-        # 5. Ensure missing enum values exist in the (now PDA) common header
-        ENUM_H="drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h"
-        if [ -f "$ENUM_H" ]; then
-          grep -q "SENSOR_FEATURE_GET_AE_EFFECTIVE_FRAME_FOR_LE" "$ENUM_H" || \
-            sed -i '/SENSOR_FEATURE_MAX/i\    SENSOR_FEATURE_GET_AE_EFFECTIVE_FRAME_FOR_LE,' "$ENUM_H"
-          
-          grep -q "SENSOR_FEATURE_GET_PERIOD_BY_SCENARIO" "$ENUM_H" || \
-            sed -i '/SENSOR_FEATURE_MAX/i\    SENSOR_FEATURE_GET_PERIOD_BY_SCENARIO,' "$ENUM_H"
-          
-          grep -q "SENSOR_FEATURE_GET_PIXEL_CLOCK_FREQ_BY_SCENARIO" "$ENUM_H" || \
-            sed -i '/SENSOR_FEATURE_MAX/i\    SENSOR_FEATURE_GET_PIXEL_CLOCK_FREQ_BY_SCENARIO,' "$ENUM_H"
-          
-          grep -q "SENSOR_FEATURE_SET_AS_SECURE_DRIVER" "$ENUM_H" || \
-            sed -i '/SENSOR_FEATURE_MAX/i\    SENSOR_FEATURE_SET_AS_SECURE_DRIVER,' "$ENUM_H"
-          echo "Ensured missing enums in $ENUM_H"
-        fi
-
-        # 6. Add S5K4H7_SENSOR_ID to kd_imgsensor.h
+        # 5. Add missing S5K4H7_SENSOR_ID
         KD_H="drivers/misc/mediatek/imgsensor/inc/kd_imgsensor.h"
         if [ -f "$KD_H" ]; then
           if ! grep -q "S5K4H7_SENSOR_ID" "$KD_H"; then
@@ -150,7 +125,7 @@ jobs:
           fi
         fi
 
-        # 7. Remove Oppo dependency from s5k3l6 and s5k5e9yx
+        # 6. Remove Oppo dependency from s5k3l6 and s5k5e9yx
         python3 -c "
         import glob, re
         pattern = re.compile(r'^.*#include\s*<\s*soc/oppo/oppo_project\.h\s*>.*$')
