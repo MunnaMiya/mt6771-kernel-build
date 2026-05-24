@@ -49,7 +49,7 @@ jobs:
         rm -rf realme-kernel
         echo "Mali r14p0 driver copied from Realme 3 kernel"
 
-    - name: Fetch missing imgsensor drivers, replace imgsensor_sensor.h and kd_imgsensor_define.h
+    - name: Fetch missing imgsensor drivers (only sensor directories)
       run: |
         git clone --depth=1 \
           https://github.com/greenorb007/android_kernel_nokia_PDA.git \
@@ -58,7 +58,7 @@ jobs:
           https://github.com/realme-mt6771-devs/android_kernel_realme_mt6771.git \
           mt6771-ref
 
-        # Copy sensor directories
+        # Copy sensor directories into the existing common/v1_1
         cp -r nokia-pda/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7_mipi_raw \
              kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7yx_mipi_raw
         cp -r mt6771-ref/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw \
@@ -66,24 +66,50 @@ jobs:
         cp -r mt6771-ref/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9_mipi_raw \
              kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9yx_mipi_raw
 
-        # Replace imgsensor_sensor.h with PDA version (already includes needed headers)
-        cp nokia-pda/drivers/misc/mediatek/imgsensor/src/common/v1_1/imgsensor_sensor.h \
-           kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/imgsensor_sensor.h
-
-        # Replace kd_imgsensor_define.h with PDA version (contains SENSOR_FUNCTION_STRUCT, etc.)
-        cp nokia-pda/drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h \
-           kernel-source/drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h
-        cp nokia-pda/drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h \
-           kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/kd_imgsensor_define.h
-
-        # Copy missing kd_imgsensor_CA_TA_cmd.h and imgsensor_ca.h
+        # Copy missing kd_imgsensor_CA_TA_cmd.h and imgsensor_ca.h to inc/
         FOUND_CA=$(find nokia-pda/drivers/misc/mediatek/imgsensor/ -name "imgsensor_ca.h" | head -n 1)
         [ -n "$FOUND_CA" ] && cp "$FOUND_CA" kernel-source/drivers/misc/mediatek/imgsensor/inc/imgsensor_ca.h || touch kernel-source/drivers/misc/mediatek/imgsensor/inc/imgsensor_ca.h
         FOUND_CMD=$(find nokia-pda/drivers/misc/mediatek/imgsensor/ -name "kd_imgsensor_CA_TA_cmd.h" | head -n 1)
         [ -n "$FOUND_CMD" ] && cp "$FOUND_CMD" kernel-source/drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_CA_TA_cmd.h || touch kernel-source/drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_CA_TA_cmd.h
 
         rm -rf nokia-pda mt6771-ref
-        echo "Sensors copied, imgsensor_sensor.h and kd_imgsensor_define.h replaced with PDA versions"
+        echo "Imgsensor drivers copied"
+
+    - name: Create imgsensor fixup header and patch imgsensor_sensor.h
+      run: |
+        cd kernel-source
+
+        # Create a fixup header with forward declarations and the missing struct
+        cat > drivers/misc/mediatek/imgsensor/src/common/v1_1/imgsensor_fix.h << 'EOF'
+        #ifndef __IMGSENSOR_FIX_H__
+        #define __IMGSENSOR_FIX_H__
+
+        /* Forward declarations to satisfy old kernel headers */
+        struct SENSOR_FUNCTION_STRUCT;
+        enum MSDK_SCENARIO_ID_ENUM;
+        enum ACDK_SENSOR_INFO_STRUCT;
+
+        /* SENSOR_WINSIZE_INFO_STRUCT definition (from PDA kernel) */
+        struct SENSOR_WINSIZE_INFO_STRUCT {
+            unsigned int full_w;
+            unsigned int full_h;
+            unsigned int x0_offset;
+            unsigned int y0_offset;
+            unsigned int scale_width;
+            unsigned int scale_height;
+            unsigned int x1_tg_offset;
+            unsigned int y1_tg_offset;
+            unsigned int x_remosaic;
+            unsigned int y_remosaic;
+        };
+
+        #endif /* __IMGSENSOR_FIX_H__ */
+        EOF
+
+        # Insert the fixup header at the very top of imgsensor_sensor.h
+        sed -i '1i #include "imgsensor_fix.h"' \
+          drivers/misc/mediatek/imgsensor/src/common/v1_1/imgsensor_sensor.h
+        echo "imgsensor_fix.h created and included"
 
     - name: Patch remaining sensor header issues
       run: |
@@ -125,6 +151,15 @@ jobs:
           sed -i '1i #include "kd_imgsensor.h"' "$SENSOR_C"
           sed -i 's/enum MSDK_SCENARIO_ID_ENUM/int/g' "$SENSOR_C"
           echo "Patched $SENSOR_C"
+        fi
+
+        # Add missing enum value to kd_imgsensor_define.h (if not already present)
+        ENUM_H="drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h"
+        if [ -f "$ENUM_H" ]; then
+          if ! grep -q "SENSOR_FEATURE_GET_AE_EFFECTIVE_FRAME_FOR_LE" "$ENUM_H"; then
+            sed -i '/SENSOR_FEATURE_MAX/i\    SENSOR_FEATURE_GET_AE_EFFECTIVE_FRAME_FOR_LE,' "$ENUM_H"
+            echo "Added enum value to $ENUM_H"
+          fi
         fi
 
     - name: Fix Build Issues (includes Oppo header removal and path additions)
