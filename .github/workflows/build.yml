@@ -121,7 +121,14 @@ jobs:
           echo "Patched $SENSOR_C"
         fi
 
-        # 5. Add S5K4H7_SENSOR_ID after S5K4H7YX_SENSOR_ID (may already exist from PDA, but safe)
+        # 5. Ensure imgsensor_sensor.h includes kd_imgsensor_define.h (local copy)
+        COMMON_H="drivers/misc/mediatek/imgsensor/src/common/v1_1/imgsensor_sensor.h"
+        if [ -f "$COMMON_H" ]; then
+          sed -i '1i #include "kd_imgsensor_define.h"' "$COMMON_H"
+          echo "Added include to $COMMON_H"
+        fi
+
+        # 6. Add S5K4H7_SENSOR_ID after S5K4H7YX_SENSOR_ID (may already exist from PDA, but safe)
         KD_H="drivers/misc/mediatek/imgsensor/inc/kd_imgsensor.h"
         if [ -f "$KD_H" ]; then
           if ! grep -q "S5K4H7_SENSOR_ID" "$KD_H"; then
