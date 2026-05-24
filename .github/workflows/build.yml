@@ -49,7 +49,7 @@ jobs:
         rm -rf realme-kernel
         echo "Mali r14p0 driver copied from Realme 3 kernel"
 
-    - name: Fetch missing imgsensor drivers, fix naming, and copy missing headers
+    - name: Fetch missing imgsensor drivers, fix naming, and copy required header
       run: |
         git clone --depth=1 \
           https://github.com/greenorb007/android_kernel_nokia_PDA.git \
@@ -83,7 +83,7 @@ jobs:
           touch kernel-source/drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_CA_TA_cmd.h
         fi
 
-        # Replace kd_imgsensor_define.h with the PDA version (contains missing struct and enums)
+        # Replace kd_imgsensor_define.h with the PDA version (contains all needed structs & enums)
         cp nokia-pda/drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h \
            kernel-source/drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h
         echo "Replaced kd_imgsensor_define.h with Nokia PDA version"
@@ -91,7 +91,7 @@ jobs:
         rm -rf nokia-pda mt6771-ref
         echo "Imgsensor drivers and headers fetched"
 
-    - name: Patch imgsensor headers – fix incomplete type, missing members, and enum additions
+    - name: Patch imgsensor headers – fix incomplete type, missing members, and include fixes
       run: |
         cd kernel-source
 
@@ -122,22 +122,7 @@ jobs:
           echo "ERROR: $SENSOR_H3 not found"; exit 1
         fi
 
-        # 4. Add missing enum values to common header (ensure they exist even after replacement)
-        ENUM_H="drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h"
-        if [ -f "$ENUM_H" ]; then
-          # Remove any previous patch attempts to prevent duplicates
-          sed -i '/SENSOR_FEATURE_GET_AE_EFFECTIVE_FRAME_FOR_LE/d' "$ENUM_H"
-          sed -i '/SENSOR_FEATURE_GET_PERIOD_BY_SCENARIO/d' "$ENUM_H"
-          sed -i '/SENSOR_FEATURE_GET_PIXEL_CLOCK_FREQ_BY_SCENARIO/d' "$ENUM_H"
-          sed -i '/SENSOR_FEATURE_SET_AS_SECURE_DRIVER/d' "$ENUM_H"
-          # Insert all missing enums before SENSOR_FEATURE_MAX
-          sed -i '/SENSOR_FEATURE_MAX/i\    SENSOR_FEATURE_GET_AE_EFFECTIVE_FRAME_FOR_LE,\n    SENSOR_FEATURE_GET_PERIOD_BY_SCENARIO,\n    SENSOR_FEATURE_GET_PIXEL_CLOCK_FREQ_BY_SCENARIO,\n    SENSOR_FEATURE_SET_AS_SECURE_DRIVER,' "$ENUM_H"
-          echo "Patched $ENUM_H with all missing enums"
-        else
-          echo "ERROR: $ENUM_H not found"; exit 1
-        fi
-
-        # 5. Add missing S5K4H7_SENSOR_ID after S5K4H7YX_SENSOR_ID
+        # 4. Add missing S5K4H7_SENSOR_ID after S5K4H7YX_SENSOR_ID
         KD_H="drivers/misc/mediatek/imgsensor/inc/kd_imgsensor.h"
         if [ -f "$KD_H" ]; then
           if ! grep -q "S5K4H7_SENSOR_ID" "$KD_H"; then
@@ -148,7 +133,7 @@ jobs:
           echo "WARNING: $KD_H not found"
         fi
 
-        # 6. Fix s5k4h7 .c file: Include missing struct definitions and fix enum mismatch
+        # 5. Fix s5k4h7 .c file: Include missing struct definitions and fix enum mismatch
         SENSOR_C="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7yx_mipi_raw/s5k4h7mipiraw_Sensor.c"
         if [ -f "$SENSOR_C" ]; then
           sed -i '1i #include "kd_imgsensor.h"' "$SENSOR_C"
@@ -156,6 +141,19 @@ jobs:
           echo "Patched $SENSOR_C with struct includes and enum fix"
         else
           echo "ERROR: $SENSOR_C not found"; exit 1
+        fi
+
+        # 6. Fix common imgsensor_sensor.h: include kd_imgsensor_define.h for SENSOR_FUNCTION_STRUCT
+        COMMON_H="drivers/misc/mediatek/imgsensor/src/common/v1_1/imgsensor_sensor.h"
+        if [ -f "$COMMON_H" ]; then
+          if ! grep -q 'kd_imgsensor_define.h' "$COMMON_H"; then
+            sed -i '1i #include "kd_imgsensor_define.h"' "$COMMON_H"
+            echo "Added include to $COMMON_H"
+          else
+            echo "Include already present in $COMMON_H"
+          fi
+        else
+          echo "WARNING: $COMMON_H not found"
         fi
 
         # 7. Ensure imgsensor/inc is in include path
