@@ -83,6 +83,15 @@ jobs:
           touch kernel-source/drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_CA_TA_cmd.h
         fi
 
+        # Find and copy any header containing SENSOR_WINSIZE_INFO_STRUCT
+        WINSIZE_H=$(grep -rl "SENSOR_WINSIZE_INFO_STRUCT" nokia-pda/drivers/misc/mediatek/imgsensor/ --include="*.h" | head -n 1)
+        if [ -n "$WINSIZE_H" ]; then
+          cp "$WINSIZE_H" kernel-source/drivers/misc/mediatek/imgsensor/inc/
+          echo "Copied header containing SENSOR_WINSIZE_INFO_STRUCT: $(basename $WINSIZE_H)"
+        else
+          echo "WARNING: SENSOR_WINSIZE_INFO_STRUCT not found in Nokia PDA kernel"
+        fi
+
         rm -rf nokia-pda mt6771-ref
         echo "Imgsensor drivers and headers fetched"
 
