@@ -1,4 +1,4 @@
-name: Inspect mt6771 seninf files
+name: Find seninf files and missing type
 
 on:
   workflow_dispatch:
@@ -19,7 +19,17 @@ jobs:
     - name: Clone Nokia PDA kernel
       run: git clone --depth=1 https://github.com/greenorb007/android_kernel_nokia_PDA.git nokia-pda
 
-    - name: Check ACDK_SENSOR_MCLK_STRUCT definition
+    - name: Find seninf.c and seninf_clk.h locations
+      run: |
+        echo "=== Nokia X5 ==="
+        find nokia-x5/drivers/misc/mediatek/imgsensor -name "seninf.c" -type f
+        find nokia-x5/drivers/misc/mediatek/imgsensor -name "seninf_clk.h" -type f
+        echo ""
+        echo "=== Nokia PDA ==="
+        find nokia-pda/drivers/misc/mediatek/imgsensor -name "seninf.c" -type f
+        find nokia-pda/drivers/misc/mediatek/imgsensor -name "seninf_clk.h" -type f
+
+    - name: Search for ACDK_SENSOR_MCLK_STRUCT definition
       run: |
         echo "=== ACDK_SENSOR_MCLK_STRUCT in Nokia X5 ==="
         grep -rn "ACDK_SENSOR_MCLK_STRUCT" nokia-x5/drivers/misc/mediatek/imgsensor/ --include="*.h" || echo "NOT FOUND"
@@ -27,38 +37,32 @@ jobs:
         echo "=== ACDK_SENSOR_MCLK_STRUCT in Nokia PDA ==="
         grep -rn "ACDK_SENSOR_MCLK_STRUCT" nokia-pda/drivers/misc/mediatek/imgsensor/ --include="*.h" || echo "NOT FOUND"
 
-    - name: Show seninf_clk.h error line (X5)
+    - name: Show seninf_clk.h around line 101 (X5)
       run: |
-        echo "=== seninf_clk.h line 101 in Nokia X5 ==="
-        sed -n '95,105p' nokia-x5/drivers/misc/mediatek/imgsensor/src/mt6771/seninf/seninf_clk.h
-
-    - name: Show seninf_clk.h same lines in PDA
-      run: |
-        echo "=== seninf_clk.h line 101 in Nokia PDA ==="
-        if [ -f "nokia-pda/drivers/misc/mediatek/imgsensor/src/mt6771/seninf/seninf_clk.h" ]; then
-          sed -n '95,105p' nokia-pda/drivers/misc/mediatek/imgsensor/src/mt6771/seninf/seninf_clk.h
+        FILE=$(find nokia-x5/drivers/misc/mediatek/imgsensor -name "seninf_clk.h" -type f | head -1)
+        if [ -n "$FILE" ]; then
+          echo "=== $FILE lines 95-105 ==="
+          sed -n '95,105p' "$FILE"
         else
-          echo "File not found in PDA"
+          echo "seninf_clk.h not found in X5"
         fi
 
-    - name: Show seninf.c lines around 155 (X5)
+    - name: Show common/v1_1 seninf.c around line 155 (X5)
       run: |
-        echo "=== seninf.c lines 150-160 in Nokia X5 ==="
-        sed -n '150,160p' nokia-x5/drivers/misc/mediatek/imgsensor/src/mt6771/seninf/seninf.c
-
-    - name: Show seninf.c same lines in PDA
-      run: |
-        echo "=== seninf.c lines 150-160 in Nokia PDA ==="
-        if [ -f "nokia-pda/drivers/misc/mediatek/imgsensor/src/mt6771/seninf/seninf.c" ]; then
-          sed -n '150,160p' nokia-pda/drivers/misc/mediatek/imgsensor/src/mt6771/seninf/seninf.c
+        FILE=$(find nokia-x5/drivers/misc/mediatek/imgsensor -name "seninf.c" -path "*/common/*" | head -1)
+        if [ -n "$FILE" ]; then
+          echo "=== $FILE lines 150-160 ==="
+          sed -n '150,160p' "$FILE"
         else
-          echo "File not found in PDA"
+          echo "common seninf.c not found in X5"
         fi
 
-    - name: List mt6771 seninf directory in both kernels
+    - name: Show common/v1_1 seninf.c around line 155 (PDA)
       run: |
-        echo "=== Nokia X5 mt6771/seninf ==="
-        ls nokia-x5/drivers/misc/mediatek/imgsensor/src/mt6771/seninf/
-        echo ""
-        echo "=== Nokia PDA mt6771/seninf ==="
-        ls nokia-pda/drivers/misc/mediatek/imgsensor/src/mt6771/seninf/ 2>/dev/null || echo "Directory missing in PDA"
+        FILE=$(find nokia-pda/drivers/misc/mediatek/imgsensor -name "seninf.c" -path "*/common/*" | head -1)
+        if [ -n "$FILE" ]; then
+          echo "=== $FILE lines 150-160 ==="
+          sed -n '150,160p' "$FILE"
+        else
+          echo "common seninf.c not found in PDA"
+        fi
