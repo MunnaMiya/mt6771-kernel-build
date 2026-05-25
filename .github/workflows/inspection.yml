@@ -1,0 +1,165 @@
+name: Inspect New Nokia 5.1 Plus Kernel Source
+
+on:
+  workflow_dispatch:
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:20.04
+
+    steps:
+    - name: Install dependencies
+      run: apt-get update && apt-get install -y git
+
+    - name: Clone new Nokia 5.1 Plus kernel (phantomhell)
+      run: git clone --depth=1 https://github.com/phantomhell/device_nokia51plus.git nokia-new
+
+    - name: Clone existing Nokia X5 kernel
+      run: git clone --depth=1 https://github.com/nokia-dev/android_kernel_nokia_mt6771.git nokia-x5
+
+    - name: Clone existing Nokia PDA kernel
+      run: git clone --depth=1 https://github.com/greenorb007/android_kernel_nokia_PDA.git nokia-pda
+
+    - name: Compare sensor directories in common/v1_1
+      run: |
+        echo "=============================================="
+        echo "=== SENSOR DIRECTORIES IN COMMON/V1_1 ==="
+        echo "=============================================="
+        for kernel in nokia-x5 nokia-pda nokia-new; do
+          echo ""
+          echo "--- $kernel ---"
+          ls -1d $kernel/drivers/misc/mediatek/imgsensor/src/common/v1_1/*/ 2>/dev/null | while read dir; do
+            basename "$dir"
+          done
+        done
+
+    - name: Check for missing sensor drivers
+      run: |
+        echo ""
+        echo "=============================================="
+        echo "=== NEEDED SENSORS (s5k3l6, s5k4h7, s5k5e9) ==="
+        echo "=============================================="
+        for sensor in s5k3l6_mipi_raw s5k4h7_mipi_raw s5k4h7yx_mipi_raw s5k5e9_mipi_raw s5k5e9yx_mipi_raw; do
+          echo ""
+          echo "--- $sensor ---"
+          for kernel in nokia-x5 nokia-pda nokia-new; do
+            if [ -d "$kernel/drivers/misc/mediatek/imgsensor/src/common/v1_1/$sensor" ]; then
+              echo "  FOUND in $kernel"
+            else
+              echo "  missing in $kernel"
+            fi
+          done
+        done
+
+    - name: Compare key imgsensor header sizes
+      run: |
+        echo ""
+        echo "=============================================="
+        echo "=== KEY HEADER SIZES (lines) ==="
+        echo "=============================================="
+        for header in kd_imgsensor_define.h kd_imgsensor.h kd_camera_feature.h kd_camera_feature_enum.h; do
+          echo ""
+          echo "--- $header ---"
+          for kernel in nokia-x5 nokia-pda nokia-new; do
+            FILE="$kernel/drivers/misc/mediatek/imgsensor/inc/$header"
+            if [ -f "$FILE" ]; then
+              SIZE=$(wc -l < "$FILE")
+              echo "  $kernel: $SIZE lines"
+            else
+              echo "  $kernel: MISSING"
+            fi
+          done
+        done
+
+    - name: Check CCU headers
+      run: |
+        echo ""
+        echo "=============================================="
+        echo "=== CCU HEADERS ==="
+        echo "=============================================="
+        for header in ccu_inc.h ccu_imgsensor_if.h; do
+          echo ""
+          echo "--- $header ---"
+          for kernel in nokia-x5 nokia-pda nokia-new; do
+            FILE="$kernel/drivers/misc/mediatek/ccu/inc/$header"
+            if [ -f "$FILE" ]; then
+              SIZE=$(wc -l < "$FILE")
+              echo "  $kernel: $SIZE lines"
+            else
+              echo "  $kernel: MISSING"
+            fi
+          done
+        done
+
+    - name: Check if new source has SENSOR_FUNCTION_STRUCT
+      run: |
+        echo ""
+        echo "=============================================="
+        echo "=== SENSOR_FUNCTION_STRUCT DEFINITION ==="
+        echo "=============================================="
+        for kernel in nokia-x5 nokia-pda nokia-new; do
+          echo ""
+          echo "--- $kernel ---"
+          grep -rn "struct SENSOR_FUNCTION_STRUCT {" --include="*.h" $kernel/drivers/misc/mediatek/imgsensor/ 2>/dev/null || echo "NOT FOUND"
+        done
+
+    - name: Check for CAMERA_DUAL_CAMERA_SENSOR_ENUM definition
+      run: |
+        echo ""
+        echo "=============================================="
+        echo "=== CAMERA_DUAL_CAMERA_SENSOR_ENUM ==="
+        echo "=============================================="
+        for kernel in nokia-x5 nokia-pda nokia-new; do
+          echo ""
+          echo "--- $kernel ---"
+          grep -rn "enum CAMERA_DUAL_CAMERA_SENSOR_ENUM" --include="*.h" $kernel/drivers/misc/mediatek/ 2>/dev/null || echo "NOT FOUND"
+        done
+
+    - name: Check for ccu_sensor_info.i2c_id member
+      run: |
+        echo ""
+        echo "=============================================="
+        echo "=== ccu_sensor_info STRUCT (has i2c_id?) ==="
+        echo "=============================================="
+        for kernel in nokia-x5 nokia-pda nokia-new; do
+          echo ""
+          echo "--- $kernel ---"
+          grep -rn "int32_t i2c_id" --include="*.h" $kernel/drivers/misc/mediatek/ccu/ 2>/dev/null || echo "i2c_id NOT FOUND in ccu headers"
+        done
+
+    - name: Check if new source has imgsensor_ca.h and kd_imgsensor_CA_TA_cmd.h
+      run: |
+        echo ""
+        echo "=============================================="
+        echo "=== MISSING HELPER HEADERS ==="
+        echo "=============================================="
+        for header in imgsensor_ca.h kd_imgsensor_CA_TA_cmd.h; do
+          echo ""
+          echo "--- $header ---"
+          for kernel in nokia-x5 nokia-pda nokia-new; do
+            FOUND=$(find $kernel/drivers/misc/mediatek/imgsensor/ -name "$header" | head -n 1)
+            if [ -n "$FOUND" ]; then
+              echo "  $kernel: FOUND ($FOUND)"
+            else
+              echo "  $kernel: MISSING"
+            fi
+          done
+        done
+
+    - name: Compare MALI GPU driver presence
+      run: |
+        echo ""
+        echo "=============================================="
+        echo "=== MALI BIFROST R14P0 ==="
+        echo "=============================================="
+        for kernel in nokia-x5 nokia-pda nokia-new; do
+          echo ""
+          echo "--- $kernel ---"
+          if [ -d "$kernel/drivers/misc/mediatek/gpu/gpu_mali/mali_bifrost/mali-r14p0" ]; then
+            echo "  FOUND"
+          else
+            echo "  MISSING"
+          fi
+        done
