@@ -1,312 +1,64 @@
-name: Build MT6771 Kernel OC
+name: Inspect mt6771 seninf files
+
 on:
   workflow_dispatch:
-  push:
-    branches: [ main ]
 
 jobs:
-  build:
+  inspect:
     runs-on: ubuntu-latest
     container:
       image: ubuntu:20.04
-    env:
-      MTK_PLATFORM: mt6771
 
     steps:
-    - name: Install Dependencies
+    - name: Install git
+      run: apt-get update && apt-get install -y git
+
+    - name: Clone Nokia X5 kernel
+      run: git clone --depth=1 https://github.com/nokia-dev/android_kernel_nokia_mt6771.git nokia-x5
+
+    - name: Clone Nokia PDA kernel
+      run: git clone --depth=1 https://github.com/greenorb007/android_kernel_nokia_PDA.git nokia-pda
+
+    - name: Check ACDK_SENSOR_MCLK_STRUCT definition
       run: |
-        apt-get update
-        apt-get install -y git wget curl bc bison flex \
-          build-essential libssl-dev libelf-dev \
-          libncurses-dev python3 python3-pip \
-          gcc-aarch64-linux-gnu \
-          binutils-aarch64-linux-gnu \
-          cpio rsync ca-certificates gnupg
-
-    - name: Get kernel_config from repo
-      env:
-        TOKEN: ${{ github.token }}
-      run: |
-        git clone --depth=1 \
-          https://x-access-token:${TOKEN}@github.com/${{ github.repository }}.git \
-          myrepo
-        cp myrepo/kernel_config.txt ./kernel_config.txt
-        echo "kernel_config.txt ready"
-
-    - name: Clone Nokia MT6771 Kernel
-      run: |
-        git clone --depth=1 \
-          https://github.com/nokia-dev/android_kernel_nokia_mt6771.git \
-          kernel-source
-
-    - name: Fetch missing Mali r14p0 driver from Realme 3 kernel
-      run: |
-        git clone --depth=1 \
-          https://github.com/realme-kernel-opensource/Realme3-kernel-source.git \
-          realme-kernel
-        cp -r realme-kernel/drivers/misc/mediatek/gpu/gpu_mali/mali_bifrost/mali-r14p0 \
-             kernel-source/drivers/misc/mediatek/gpu/gpu_mali/mali_bifrost/
-        rm -rf realme-kernel
-        echo "Mali r14p0 driver copied from Realme 3 kernel"
-
-    - name: Replace imgsensor framework with Nokia PDA version and add missing sensors
-      run: |
-        git clone --depth=1 \
-          https://github.com/greenorb007/android_kernel_nokia_PDA.git \
-          nokia-pda
-        git clone --depth=1 --branch android-13.0 \
-          https://github.com/realme-mt6771-devs/android_kernel_realme_mt6771.git \
-          mt6771-ref
-
-        # 1. Replace the ENTIRE imgsensor/inc directory with PDA version
-        rm -rf kernel-source/drivers/misc/mediatek/imgsensor/inc
-        cp -r nokia-pda/drivers/misc/mediatek/imgsensor/inc \
-             kernel-source/drivers/misc/mediatek/imgsensor/inc
-
-        # 2. Replace the ENTIRE common/v1_1 with PDA version
-        rm -rf kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1
-        cp -r nokia-pda/drivers/misc/mediatek/imgsensor/src/common/v1_1 \
-             kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1
-
-        # 3. Rename s5k4h7 → s5k4h7yx
-        mv kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7_mipi_raw \
-           kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7yx_mipi_raw
-
-        # 4. Add missing sensor directories from Realme reference
-        cp -r mt6771-ref/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw \
-             kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/
-        cp -r mt6771-ref/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9_mipi_raw \
-             kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9yx_mipi_raw
-
-        # 5. Replace CCU headers that define ccu_sensor_info (contains i2c_id)
-        cp nokia-pda/drivers/misc/mediatek/ccu/inc/ccu_inc.h \
-           kernel-source/drivers/misc/mediatek/ccu/inc/ccu_inc.h
-        cp nokia-pda/drivers/misc/mediatek/ccu/inc/ccu_imgsensor_if.h \
-           kernel-source/drivers/misc/mediatek/ccu/inc/ccu_imgsensor_if.h
-
-        rm -rf nokia-pda mt6771-ref
-        echo "Imgsensor framework and CCU headers fully replaced with Nokia PDA versions"
-
-    - name: Verify critical header replacements
-      run: |
-        cd kernel-source
-        echo "=== kd_camera_feature_enum.h line count (must be 412) ==="
-        wc -l drivers/misc/mediatek/imgsensor/inc/kd_camera_feature_enum.h
+        echo "=== ACDK_SENSOR_MCLK_STRUCT in Nokia X5 ==="
+        grep -rn "ACDK_SENSOR_MCLK_STRUCT" nokia-x5/drivers/misc/mediatek/imgsensor/ --include="*.h" || echo "NOT FOUND"
         echo ""
-        echo "=== kd_imgsensor_define.h line count (must be 1428) ==="
-        wc -l drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h
-        echo ""
-        echo "=== ccu_inc.h contains i2c_id? (must be 1) ==="
-        grep -c "i2c_id" drivers/misc/mediatek/ccu/inc/ccu_inc.h
+        echo "=== ACDK_SENSOR_MCLK_STRUCT in Nokia PDA ==="
+        grep -rn "ACDK_SENSOR_MCLK_STRUCT" nokia-pda/drivers/misc/mediatek/imgsensor/ --include="*.h" || echo "NOT FOUND"
 
-    - name: Apply remaining sensor patches
+    - name: Show seninf_clk.h error line (X5)
       run: |
-        cd kernel-source
+        echo "=== seninf_clk.h line 101 in Nokia X5 ==="
+        sed -n '95,105p' nokia-x5/drivers/misc/mediatek/imgsensor/src/mt6771/seninf/seninf_clk.h
 
-        # 1. s5k3l6: add missing struct member
-        SENSOR_H1="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw/s5k3l6mipiraw_Sensor.h"
-        if [ -f "$SENSOR_H1" ]; then
-          sed -i '/} imgsensor_struct;/i\    kal_uint8 current_ae_effective_frame;' "$SENSOR_H1"
-          echo "Patched $SENSOR_H1"
-        fi
-
-        # 2. s5k5e9yx: add missing struct member
-        SENSOR_H2="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9yx_mipi_raw/s5k5e9mipiraw_Sensor.h"
-        if [ -f "$SENSOR_H2" ]; then
-          sed -i '/} imgsensor_struct;/i\    kal_uint8 current_ae_effective_frame;' "$SENSOR_H2"
-          echo "Patched $SENSOR_H2"
-        fi
-
-        # 3. s5k4h7yx: replace incomplete enum with int in .h file
-        SENSOR_H3="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7yx_mipi_raw/s5k4h7mipiraw_Sensor.h"
-        if [ -f "$SENSOR_H3" ]; then
-          sed -i 's/enum MSDK_SCENARIO_ID_ENUM current_scenario_id;.*/int current_scenario_id; \/* was enum MSDK_SCENARIO_ID_ENUM *\//' "$SENSOR_H3"
-          echo "Fixed enum in $SENSOR_H3"
-        fi
-
-        # 4. Fix s5k4h7 .c file: add include and fix enum mismatch
-        SENSOR_C="drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7yx_mipi_raw/s5k4h7mipiraw_Sensor.c"
-        if [ -f "$SENSOR_C" ]; then
-          sed -i '1i #include "kd_imgsensor.h"' "$SENSOR_C"
-          sed -i 's/enum MSDK_SCENARIO_ID_ENUM/int/g' "$SENSOR_C"
-          echo "Patched $SENSOR_C"
-        fi
-
-        # 5. Add missing S5K4H7_SENSOR_ID
-        KD_H="drivers/misc/mediatek/imgsensor/inc/kd_imgsensor.h"
-        if [ -f "$KD_H" ]; then
-          if ! grep -q "S5K4H7_SENSOR_ID" "$KD_H"; then
-            sed -i '/^#define S5K4H7YX_SENSOR_ID/a #define S5K4H7_SENSOR_ID 0x487B' "$KD_H"
-            echo "Added S5K4H7_SENSOR_ID to $KD_H"
-          fi
-        fi
-
-        # 6. Remove Oppo dependency from s5k3l6 and s5k5e9yx
-        python3 -c "
-        import glob, re
-        pattern = re.compile(r'^.*#include\s*<\s*soc/oppo/oppo_project\.h\s*>.*$')
-        for f in glob.glob('drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw/s5k3l6mipiraw_Sensor.c') + \
-                 glob.glob('drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9yx_mipi_raw/s5k5e9mipiraw_Sensor.c'):
-            with open(f, 'r') as file:
-                lines = file.readlines()
-            new_lines = [line for line in lines if not pattern.match(line)]
-            with open(f, 'w') as file:
-                file.writelines(new_lines)
-            print(f'Cleaned: {f}')
-        "
-        mkdir -p include/soc/oppo
-        touch include/soc/oppo/oppo_project.h
-
-    - name: Fix Build Issues (include paths, warnings, etc.)
+    - name: Show seninf_clk.h same lines in PDA
       run: |
-        cd kernel-source
-        find . -type f \( -name "Makefile" -o -name "Kbuild" \) \
-          -exec sed -i 's/-Werror//g' {} + 2>/dev/null || true
-        grep -rl "implicit-function-declaration" . 2>/dev/null | while read f; do
-          sed -i '/implicit-function-declaration/d' "$f"
-        done
-        sed -i '/^YYLTYPE yylloc;/s/^/extern /' \
-          scripts/dtc/dtc-lexer.lex.c_shipped 2>/dev/null || true
-        sed -i 's/(desc && desc->action && desc->action->name) ?/(0) ?/g' \
-          kernel/irq/irqdesc.c
-
-        python3 -c "
-        import os, glob
-        for makefile in glob.glob('drivers/misc/mediatek/**/Makefile', recursive=True):
-            dir = os.path.dirname(makefile)
-            line = f'ccflags-y += -I\$(srctree)/{dir}\n'
-            with open(makefile, 'r+') as f:
-                content = f.read()
-                if line.strip() not in content:
-                    f.seek(0, 0)
-                    f.write(line + content)
-        "
-
-        for d in \
-          'drivers/devfreq' \
-          'drivers/clk/mediatek' \
-          'drivers/misc/mediatek/eccci/mt6771' \
-          'drivers/misc/mediatek/base/power/cm_mgr_v1' \
-          'drivers/misc/mediatek/base/power/mt6771' \
-          'drivers/misc/mediatek/base/power/ppm_v3/src/mach/mt6771' \
-          'drivers/misc/mediatek/base/power/spm_v4' \
-          'drivers/misc/mediatek/base/power/swpm_v1/mt6771' \
-          'drivers/misc/mediatek/cameraisp/src/isp_50' \
-          'drivers/misc/mediatek/ccu/src/mt6771' \
-          'drivers/misc/mediatek/imgsensor/inc'; do
-          sed -i "1i ccflags-y += -I\$(srctree)/$d" $d/Makefile 2>/dev/null || true
-        done
-
-        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci' \
-          drivers/misc/mediatek/eccci/mt6771/Makefile 2>/dev/null || true
-        sed -i '1i ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci' \
-          drivers/misc/mediatek/eccci/Makefile 2>/dev/null || true
-
-        echo "All build fixes applied"
-
-    - name: Patch CPU OPP – Force 1989 MHz @ 1.000V (CPU_LEVEL_0 / V3)
-      shell: python3 {0}
-      run: |
-        path = "kernel-source/drivers/misc/mediatek/base/power/cpufreq_v1/src/mach/mt6771/mtk_cpufreq_platform.c"
-        with open(path, "r") as f:
-            content = f.read()
-        func_start = content.find("unsigned int _mt_cpufreq_get_cpu_level(void)")
-        if func_start == -1:
-            print("ERROR: CPU function not found")
-            exit(1)
-        brace_start = content.find("{", func_start)
-        if brace_start == -1:
-            print("ERROR: opening brace not found")
-            exit(1)
-        count = 1
-        pos = brace_start + 1
-        while count > 0 and pos < len(content):
-            if content[pos] == '{':
-                count += 1
-            elif content[pos] == '}':
-                count -= 1
-            pos += 1
-        func_end = pos
-        replacement = (
-            content[func_start:brace_start + 1] +
-            "\n\t/* OC: Force CPU_LEVEL_0 = 1989 MHz (2.0 GHz) @ 1.000V */\n"
-            "\tunsigned int lv = CPU_LEVEL_0;\n"
-            "\tturbo_flag = 0;\n"
-            "\ttag_pr_info(\"%d, %d, (%d, %d)\\n\", lv, turbo_flag, UP_SRATE, DOWN_SRATE);\n"
-            "\treturn lv;\n"
-            "}"
-        )
-        content = content[:func_start] + replacement + content[func_end:]
-        print("CPU patch applied")
-        with open(path, "w") as f:
-            f.write(content)
-
-    - name: Patch GPU Segment – Force 900 MHz @ 0.900V (SEGMENT_1)
-      shell: python3 {0}
-      run: |
-        path = "kernel-source/drivers/misc/mediatek/base/power/mt6771/mtk_gpufreq_core.c"
-        with open(path, "r") as f:
-            content = f.read()
-        efuse_line = "g_efuse_speed_bound_id = (readl(g_efuse_base + 0x50) & 0x0F000000);"
-        start_idx = content.find(efuse_line)
-        if start_idx == -1:
-            print("ERROR: efuse read not found")
-            exit(1)
-        start_idx += len(efuse_line)
-        log_line = 'gpufreq_pr_info("@%s: g_efuse_speed_bound_id'
-        end_idx = content.find(log_line, start_idx)
-        if end_idx == -1:
-            print("ERROR: segment log line not found")
-            exit(1)
-        replacement = (
-            "\n"
-            "\t/* OC: Force Segment 1 = 900 MHz GPU @ 0.900V */\n"
-            "\tg_segment_id = MT6771_SEGMENT_1;\n\n"
-        )
-        content = content[:start_idx] + replacement + content[end_idx:]
-        print("GPU patch applied")
-        with open(path, "w") as f:
-            f.write(content)
-
-    - name: Copy Kernel Config
-      run: |
-        cp kernel_config.txt \
-          kernel-source/arch/arm64/configs/walton_defconfig
-        echo "Config copied"
-
-    - name: Configure Kernel
-      run: |
-        cd kernel-source
-        make ARCH=arm64 \
-             CROSS_COMPILE=aarch64-linux-gnu- \
-             walton_defconfig
-
-    - name: Build Kernel
-      shell: bash
-      run: |
-        cd kernel-source
-        set -o pipefail
-        make ARCH=arm64 \
-             CROSS_COMPILE=aarch64-linux-gnu- \
-             HOSTCFLAGS="-fcommon" \
-             -j$(nproc) Image.gz 2>&1 | tee build.log
-        BUILD_RESULT=${PIPESTATUS[0]}
-        echo "Exit code: $BUILD_RESULT"
-        if [ -f arch/arm64/boot/Image.gz ]; then
-          echo "SUCCESS"
-          ls -lh arch/arm64/boot/Image.gz
-          strings arch/arm64/boot/Image.gz | grep "Linux version" || true
+        echo "=== seninf_clk.h line 101 in Nokia PDA ==="
+        if [ -f "nokia-pda/drivers/misc/mediatek/imgsensor/src/mt6771/seninf/seninf_clk.h" ]; then
+          sed -n '95,105p' nokia-pda/drivers/misc/mediatek/imgsensor/src/mt6771/seninf/seninf_clk.h
         else
-          echo "FAILED"
-          grep "error:" build.log | grep -v "warning:" | tail -20
-          exit 1
+          echo "File not found in PDA"
         fi
 
-    - name: Upload Kernel
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: kernel-oc
-        path: |
-          kernel-source/arch/arm64/boot/Image.gz
-          kernel-source/build.log
+    - name: Show seninf.c lines around 155 (X5)
+      run: |
+        echo "=== seninf.c lines 150-160 in Nokia X5 ==="
+        sed -n '150,160p' nokia-x5/drivers/misc/mediatek/imgsensor/src/mt6771/seninf/seninf.c
+
+    - name: Show seninf.c same lines in PDA
+      run: |
+        echo "=== seninf.c lines 150-160 in Nokia PDA ==="
+        if [ -f "nokia-pda/drivers/misc/mediatek/imgsensor/src/mt6771/seninf/seninf.c" ]; then
+          sed -n '150,160p' nokia-pda/drivers/misc/mediatek/imgsensor/src/mt6771/seninf/seninf.c
+        else
+          echo "File not found in PDA"
+        fi
+
+    - name: List mt6771 seninf directory in both kernels
+      run: |
+        echo "=== Nokia X5 mt6771/seninf ==="
+        ls nokia-x5/drivers/misc/mediatek/imgsensor/src/mt6771/seninf/
+        echo ""
+        echo "=== Nokia PDA mt6771/seninf ==="
+        ls nokia-pda/drivers/misc/mediatek/imgsensor/src/mt6771/seninf/ 2>/dev/null || echo "Directory missing in PDA"
