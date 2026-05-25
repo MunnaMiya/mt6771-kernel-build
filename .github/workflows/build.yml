@@ -87,6 +87,18 @@ jobs:
         rm -rf nokia-pda mt6771-ref
         echo "Imgsensor framework and CCU headers fully replaced with Nokia PDA versions"
 
+    - name: Verify critical header replacements
+      run: |
+        cd kernel-source
+        echo "=== kd_camera_feature_enum.h line count (must be 412) ==="
+        wc -l drivers/misc/mediatek/imgsensor/inc/kd_camera_feature_enum.h
+        echo ""
+        echo "=== kd_imgsensor_define.h line count (must be 1428) ==="
+        wc -l drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h
+        echo ""
+        echo "=== ccu_inc.h contains i2c_id? (must be 1) ==="
+        grep -c "i2c_id" drivers/misc/mediatek/ccu/inc/ccu_inc.h
+
     - name: Apply remaining sensor patches
       run: |
         cd kernel-source
