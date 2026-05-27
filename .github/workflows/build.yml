@@ -1,4 +1,4 @@
-name: Verify s5k3l6 header after patching
+name: Inspect realme s5k3l6 includes
 
 on:
   workflow_dispatch:
@@ -13,28 +13,31 @@ jobs:
     - name: Install git
       run: apt-get update && apt-get install -y git
 
-    - name: Clone Nokia PDA kernel (reference)
-      run: git clone --depth=1 https://github.com/greenorb007/android_kernel_nokia_PDA.git nokia-pda
-
-    - name: Clone Realme kernel (source of sensor)
+    - name: Clone Realme kernel
       run: git clone --depth=1 --branch android-13.0 https://github.com/realme-mt6771-devs/android_kernel_realme_mt6771.git realme
 
-    - name: Show first 10 lines of realme s5k3l6 header
+    - name: Clone Nokia PDA kernel
+      run: git clone --depth=1 https://github.com/greenorb007/android_kernel_nokia_PDA.git nokia-pda
+
+    - name: Show includes in realme s5k3l6 header (lines 10-40)
       run: |
         FILE="realme/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw/s5k3l6mipiraw_Sensor.h"
-        echo "=== Realme s5k3l6 header first 10 lines ==="
-        head -10 "$FILE"
+        echo "=== Realme s5k3l6 header lines 10-40 ==="
+        sed -n '10,40p' "$FILE"
 
-    - name: Show first 10 lines of realme s5k3l6 C file
+    - name: Show includes in realme s5k3l6 C file (lines 10-40)
       run: |
         FILE="realme/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw/s5k3l6mipiraw_Sensor.c"
-        echo "=== Realme s5k3l6 C file first 10 lines ==="
-        head -10 "$FILE"
+        echo "=== Realme s5k3l6 C file lines 10-40 ==="
+        sed -n '10,40p' "$FILE"
 
-    - name: Check if kd_imgsensor_define.h exists in PDA common/v1_1
+    - name: Show first 5 lines of PDA imgsensor_sensor.h to see its includes
       run: |
-        if [ -f "nokia-pda/drivers/misc/mediatek/imgsensor/src/common/v1_1/kd_imgsensor_define.h" ]; then
-          echo "EXISTS"
-        else
-          echo "MISSING"
-        fi
+        FILE="nokia-pda/drivers/misc/mediatek/imgsensor/src/common/v1_1/imgsensor_sensor.h"
+        echo "=== PDA imgsensor_sensor.h first 5 lines ==="
+        head -5 "$FILE"
+
+    - name: Check if PDA kd_imgsensor_define.h defines MSDK_SCENARIO_ID_ENUM
+      run: |
+        echo "=== MSDK_SCENARIO_ID_ENUM in PDA ==="
+        grep -n "MSDK_SCENARIO_ID_ENUM" nokia-pda/drivers/misc/mediatek/imgsensor/inc/kd_imgsensor_define.h | head -5
