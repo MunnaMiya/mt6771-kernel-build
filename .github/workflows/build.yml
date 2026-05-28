@@ -58,17 +58,17 @@ jobs:
           https://github.com/realme-mt6771-devs/android_kernel_realme_mt6771.git \
           mt6771-ref
 
-        # 1. Replace the ENTIRE imgsensor/inc directory with PDA version
+        # 1. Replace imgsensor/inc
         rm -rf kernel-source/drivers/misc/mediatek/imgsensor/inc
         cp -r nokia-pda/drivers/misc/mediatek/imgsensor/inc \
              kernel-source/drivers/misc/mediatek/imgsensor/inc
 
-        # 2. Replace the ENTIRE common/v1_1 with PDA version
+        # 2. Replace common/v1_1
         rm -rf kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1
         cp -r nokia-pda/drivers/misc/mediatek/imgsensor/src/common/v1_1 \
              kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1
 
-        # 3. Replace mt6771/seninf and Makefile with PDA version
+        # 3. Replace mt6771/seninf and Makefile
         rm -rf kernel-source/drivers/misc/mediatek/imgsensor/src/mt6771/seninf
         cp -r nokia-pda/drivers/misc/mediatek/imgsensor/src/mt6771/seninf \
              kernel-source/drivers/misc/mediatek/imgsensor/src/mt6771/seninf
@@ -79,13 +79,13 @@ jobs:
         mv kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7_mipi_raw \
            kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7yx_mipi_raw
 
-        # 5. Add missing sensor directories from Realme reference
+        # 5. Add missing sensors from Realme
         cp -r mt6771-ref/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw \
              kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/
         cp -r mt6771-ref/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9_mipi_raw \
              kernel-source/drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9yx_mipi_raw
 
-        # 6. Replace CCU headers that define ccu_sensor_info
+        # 6. Replace CCU headers
         cp nokia-pda/drivers/misc/mediatek/ccu/inc/ccu_inc.h \
            kernel-source/drivers/misc/mediatek/ccu/inc/ccu_inc.h
         cp nokia-pda/drivers/misc/mediatek/ccu/inc/ccu_imgsensor_if.h \
@@ -94,55 +94,40 @@ jobs:
         rm -rf nokia-pda mt6771-ref
         echo "Imgsensor framework fully replaced with Nokia PDA versions"
 
-    - name: Apply remaining sensor patches and add missing includes
+    - name: Apply sensor patches – add includes and fix types
       run: |
         cd kernel-source
 
-        # --- Function to add include if missing ---
-        add_include() {
-          local file="$1"
-          local header="$2"
-          if [ -f "$file" ]; then
-            if ! grep -q "#include \"$header\"" "$file"; then
-              sed -i "1i #include \"$header\"" "$file"
-              echo "Added #include \"$header\" to $file"
-            else
-              echo "Include already present in $file"
-            fi
-          fi
-        }
+        # ---- Add include to s5k3l6 .h and .c ----
+        echo '#include "kd_imgsensor_define.h"' | cat - drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw/s5k3l6mipiraw_Sensor.h > /tmp/tmp_h && mv /tmp/tmp_h drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw/s5k3l6mipiraw_Sensor.h
+        echo '#include "kd_imgsensor_define.h"' | cat - drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw/s5k3l6mipiraw_Sensor.c > /tmp/tmp_c && mv /tmp/tmp_c drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw/s5k3l6mipiraw_Sensor.c
 
-        # ---- s5k3l6: add include to both .h and .c ----
-        add_include "drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw/s5k3l6mipiraw_Sensor.h" "kd_imgsensor_define.h"
-        add_include "drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw/s5k3l6mipiraw_Sensor.c" "kd_imgsensor_define.h"
+        # ---- Add include to s5k5e9yx .h and .c ----
+        echo '#include "kd_imgsensor_define.h"' | cat - drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9yx_mipi_raw/s5k5e9mipiraw_Sensor.h > /tmp/tmp_h2 && mv /tmp/tmp_h2 drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9yx_mipi_raw/s5k5e9mipiraw_Sensor.h
+        echo '#include "kd_imgsensor_define.h"' | cat - drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9yx_mipi_raw/s5k5e9mipiraw_Sensor.c > /tmp/tmp_c2 && mv /tmp/tmp_c2 drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9yx_mipi_raw/s5k5e9mipiraw_Sensor.c
 
-        # Also add missing struct member
+        # ---- Add missing struct member to s5k3l6 header ----
         sed -i '/} imgsensor_struct;/i\    kal_uint8 current_ae_effective_frame;' \
           drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw/s5k3l6mipiraw_Sensor.h
 
-        # ---- s5k5e9yx: add include to both .h and .c ----
-        add_include "drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9yx_mipi_raw/s5k5e9mipiraw_Sensor.h" "kd_imgsensor_define.h"
-        add_include "drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9yx_mipi_raw/s5k5e9mipiraw_Sensor.c" "kd_imgsensor_define.h"
-
-        # Add missing struct member
+        # ---- Add missing struct member to s5k5e9yx header ----
         sed -i '/} imgsensor_struct;/i\    kal_uint8 current_ae_effective_frame;' \
           drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9yx_mipi_raw/s5k5e9mipiraw_Sensor.h
 
-        # ---- s5k4h7yx: replace incomplete enum with int ----
+        # ---- s5k4h7yx: replace incomplete enum with int in .h ----
         sed -i 's/enum MSDK_SCENARIO_ID_ENUM current_scenario_id;.*/int current_scenario_id; \/* was enum MSDK_SCENARIO_ID_ENUM *\//' \
           drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7yx_mipi_raw/s5k4h7mipiraw_Sensor.h
 
-        # Add include and fix enum in .c
-        add_include "drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7yx_mipi_raw/s5k4h7mipiraw_Sensor.c" "kd_imgsensor.h"
+        # ---- s5k4h7yx .c: add include and fix enum ----
+        echo '#include "kd_imgsensor.h"' | cat - drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7yx_mipi_raw/s5k4h7mipiraw_Sensor.c > /tmp/tmp_c3 && mv /tmp/tmp_c3 drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7yx_mipi_raw/s5k4h7mipiraw_Sensor.c
         sed -i 's/enum MSDK_SCENARIO_ID_ENUM/int/g' \
           drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k4h7yx_mipi_raw/s5k4h7mipiraw_Sensor.c
 
-        # ---- Add missing S5K4H7_SENSOR_ID ----
+        # ---- Add S5K4H7_SENSOR_ID ----
         KD_H="drivers/misc/mediatek/imgsensor/inc/kd_imgsensor.h"
         if [ -f "$KD_H" ]; then
           if ! grep -q "S5K4H7_SENSOR_ID" "$KD_H"; then
             sed -i '/^#define S5K4H7YX_SENSOR_ID/a #define S5K4H7_SENSOR_ID 0x487B' "$KD_H"
-            echo "Added S5K4H7_SENSOR_ID to $KD_H"
           fi
         fi
 
@@ -161,6 +146,16 @@ jobs:
         "
         mkdir -p include/soc/oppo
         touch include/soc/oppo/oppo_project.h
+
+    - name: Verify includes were added
+      run: |
+        cd kernel-source
+        echo "=== s5k3l6 header first line ==="
+        head -1 drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw/s5k3l6mipiraw_Sensor.h
+        echo "=== s5k3l6 C file first line ==="
+        head -1 drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k3l6_mipi_raw/s5k3l6mipiraw_Sensor.c
+        echo "=== s5k5e9yx header first line ==="
+        head -1 drivers/misc/mediatek/imgsensor/src/common/v1_1/s5k5e9yx_mipi_raw/s5k5e9mipiraw_Sensor.h
 
     - name: Fix Build Issues (include paths, warnings, etc.)
       run: |
